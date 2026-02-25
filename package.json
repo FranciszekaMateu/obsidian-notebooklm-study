@@ -1,0 +1,26 @@
+{
+    "name": "obsidian-notebooklm-flashcards",
+    "version": "1.0.0",
+    "description": "Import flashcards from NotebookLM CSV files into Obsidian Spaced Repetition format.",
+    "main": "main.js",
+    "scripts": {
+        "dev": "node esbuild.config.mjs",
+        "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+    },
+    "keywords": [
+        "obsidian",
+        "notebooklm",
+        "flashcards",
+        "spaced-repetition"
+    ],
+    "author": "Antigravity",
+    "license": "MIT",
+    "devDependencies": {
+        "@types/node": "^16.11.6",
+        "builtin-modules": "^3.2.0",
+        "esbuild": "0.13.12",
+        "obsidian": "latest",
+        "tslib": "2.3.1",
+        "typescript": "4.4.4"
+    }
+}

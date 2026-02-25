@@ -1,0 +1,10 @@
+{
+    "id": "notebooklm-csv-importer",
+    "name": "NotebookLM CSV Importer",
+    "version": "1.0.0",
+    "minAppVersion": "0.15.0",
+    "description": "Import flashcards from NotebookLM CSV files into Obsidian Spaced Repetition format.",
+    "author": "Antigravity",
+    "authorUrl": "https://github.com/google-deepmind",
+    "isDesktopOnly": false
+}

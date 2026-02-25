@@ -1,0 +1,7 @@
+node_modules/
+main.js
+.DS_Store
+.obsidian/
+dist/
+build/
+*.log
