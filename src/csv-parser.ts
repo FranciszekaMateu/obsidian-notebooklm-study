@@ -10,6 +10,11 @@ export function parseCSV(content: string): Flashcard[] {
     // Auto-detect format
     const firstLine = lines[0];
     
+    // Format C: Multiple Choice (Quiz)
+    if (content.includes('; isCorrect:')) {
+        return parseFormatC(lines);
+    }
+    
     // Format B: Q: ...; A: ...
     if (firstLine.includes('Q:') && firstLine.includes('; A:')) {
         return parseFormatB(lines);
@@ -17,6 +22,62 @@ export function parseCSV(content: string): Flashcard[] {
     
     // Default to Format A (Standard CSV)
     return parseFormatA(content);
+}
+
+function parseFormatC(lines: string[]): Flashcard[] {
+    const flashcards: Flashcard[] = [];
+    let currentQuestion = "";
+    let options: { text: string, isCorrect: boolean }[] = [];
+
+    const letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+
+    const createFlashcard = () => {
+        if (!currentQuestion) return;
+        
+        let questionText = currentQuestion + "\n";
+        let correctAnswer = "";
+        
+        options.forEach((opt, index) => {
+            const letter = letters[index] || (index + 1).toString();
+            questionText += `\n${letter}) ${opt.text}`;
+            if (opt.isCorrect) {
+                correctAnswer = `${letter}) ${opt.text}`;
+            }
+        });
+
+        flashcards.push({
+            question: questionText.trim(),
+            answer: correctAnswer.trim()
+        });
+    };
+
+    for (const line of lines) {
+        // Remove index prefix if exists (e.g. "1: ")
+        const cleanLine = line.replace(/^\d+:\s*/, '');
+        
+        const parts = cleanLine.split('; A:');
+        if (parts.length >= 2) {
+            const qPart = parts[0].replace(/^Q:\s*/, '').trim();
+            const remainder = parts.slice(1).join('; A:');
+            const subParts = remainder.split('; isCorrect:');
+            
+            if (subParts.length >= 2) {
+                const aText = subParts[0].trim();
+                const isCorrect = subParts[1].trim().toLowerCase() === 'true';
+
+                if (qPart !== currentQuestion) {
+                    createFlashcard();
+                    currentQuestion = qPart;
+                    options = [];
+                }
+                options.push({ text: aText, isCorrect });
+            }
+        }
+    }
+    
+    createFlashcard(); // Don't forget the last one
+    
+    return flashcards;
 }
 
 function parseFormatB(lines: string[]): Flashcard[] {

@@ -16,16 +16,24 @@ export function convertToMarkdown(
     let markdown = `${tag}\n\n`;
     
     for (const card of flashcards) {
+        const isMultiLine = card.question.includes('\n') || card.answer.includes('\n');
+        
         // Escape the separator in content if it matches
         const q = card.question.replace(new RegExp(separator, 'g'), separator.split('').join(' '));
         const a = card.answer.replace(new RegExp(separator, 'g'), separator.split('').join(' '));
         
-        if (separator === '?' || separator === '??') {
+        let effectiveSeparator = separator;
+        if (isMultiLine) {
+            if (separator === '::') effectiveSeparator = '?';
+            if (separator === ':::') effectiveSeparator = '??';
+        }
+
+        if (effectiveSeparator === '?' || effectiveSeparator === '??') {
             // Multiline format
-            markdown += `${q}\n${separator}\n${a}\n\n`;
+            markdown += `${q}\n${effectiveSeparator}\n${a}\n\n`;
         } else {
             // Single line format
-            markdown += `${q}${separator}${a}\n\n`;
+            markdown += `${q}${effectiveSeparator}${a}\n\n`;
         }
     }
     
