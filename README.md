@@ -10,6 +10,13 @@ This plugin allows you to import flashcards from CSV files exported by NotebookL
 
 ## Installation
 
+### Installation via BRAT (Recommended)
+1. Install the [BRAT plugin](https://github.com/TfTHacker/obsidian42-brat) from the Obsidian Community Plugins.
+2. Open the command palette and run `BRAT: Plugins: Add a beta plugin for testing`.
+3. Enter the repository URL: `https://github.com/FranciszekaMateu/obsidian-notebooklm-flashcards`.
+4. Click "Add Plugin".
+5. Enable the plugin in Obsidian settings.
+
 ### Manual Installation
 1. Download the latest release (`main.js`, `manifest.json`, `styles.css`).
 2. Create a folder named `notebooklm-csv-importer` in your vault's `.obsidian/plugins/` directory.
