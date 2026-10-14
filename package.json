@@ -1,11 +1,12 @@
 {
     "name": "obsidian-notebooklm-flashcards",
-    "version": "1.0.0",
-    "description": "Import flashcards from NotebookLM CSV files into Obsidian Spaced Repetition format.",
+    "version": "2.0.0",
+    "description": "Study NotebookLM flashcards, quizzes and mind maps in Obsidian with FSRS spaced repetition.",
     "main": "main.js",
     "scripts": {
         "dev": "node esbuild.config.mjs",
-        "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+        "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+        "test": "esbuild tests/core.test.ts --bundle --platform=node --outfile=.test-build/core.test.js --log-level=warning && node --test .test-build/core.test.js"
     },
     "keywords": [
         "obsidian",
@@ -13,13 +14,16 @@
         "flashcards",
         "spaced-repetition"
     ],
-    "author": "Antigravity",
+    "author": "FranciszekaMateu",
     "license": "MIT",
     "devDependencies": {
-        "@types/node": "^16.11.6",
-        "esbuild": "0.13.12",
-        "obsidian": "latest",
-        "tslib": "2.3.1",
-        "typescript": "4.4.4"
+        "@types/node": "20.19.9",
+        "esbuild": "0.28.2",
+        "obsidian": "1.13.1",
+        "tslib": "2.8.1",
+        "typescript": "5.9.3"
+    },
+    "dependencies": {
+        "ts-fsrs": "5.4.2"
     }
 }

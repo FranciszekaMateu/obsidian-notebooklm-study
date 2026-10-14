@@ -1,6 +1,6 @@
 import esbuild from "esbuild";
 import process from "process";
-const builtins = ["assert","async_hooks","buffer","child_process","cluster","console","constants","crypto","dgram","dns","domain","events","fs","http","http2","https","inspector","module","net","os","path","perf_hooks","process","punycode","querystring","readline","repl","stream","string_decoder","timers","tls","trace_events","tty","url","util","v8","vm","worker_threads","zlib"];
+import { builtinModules } from "module";
 
 const banner =
 `/*
@@ -9,12 +9,10 @@ if you want to view the source, please visit the github repository of this plugi
 */
 `;
 
-const prod = (process.argv[2] === "production");
+const prod = process.argv[2] === "production";
 
-esbuild.build({
-    banner: {
-        js: banner,
-    },
+const context = await esbuild.context({
+    banner: { js: banner },
     entryPoints: ["src/main.ts"],
     bundle: true,
     external: [
@@ -31,12 +29,20 @@ esbuild.build({
         "@lezer/common",
         "@lezer/highlight",
         "@lezer/lr",
-        ...builtins],
+        ...builtinModules,
+    ],
     format: "cjs",
-    watch: !prod,
     target: "es2018",
     logLevel: "info",
     sourcemap: prod ? false : "inline",
     treeShaking: true,
+    minify: prod,
     outfile: "main.js",
-}).catch(() => process.exit(1));
+});
+
+if (prod) {
+    await context.rebuild();
+    process.exit(0);
+} else {
+    await context.watch();
+}

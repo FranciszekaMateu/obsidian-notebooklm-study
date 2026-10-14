@@ -1,10 +1,10 @@
 {
     "id": "notebooklm-csv-importer",
-    "name": "NotebookLM CSV Importer",
-    "version": "1.0.0",
-    "minAppVersion": "0.15.0",
-    "description": "Import flashcards from NotebookLM CSV files into Spaced Repetition format.",
-    "author": "Antigravity",
-    "authorUrl": "https://github.com/google-deepmind",
+    "name": "NotebookLM Study",
+    "version": "2.0.0",
+    "minAppVersion": "1.7.2",
+    "description": "Study NotebookLM flashcards, quizzes and mind maps with FSRS spaced repetition. Sync directly from NotebookLM or import CSV/JSON exports.",
+    "author": "FranciszekaMateu",
+    "authorUrl": "https://github.com/FranciszekaMateu",
     "isDesktopOnly": false
 }
