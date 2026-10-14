@@ -7,7 +7,7 @@ import { NlmCli } from "./nlm-cli";
 import { NoteWriter } from "./note-writer";
 import { DEFAULT_SETTINGS, NotebookLMStudySettings, NotebookLMStudySettingTab } from "./settings";
 import { DeckIndex } from "./srs/deck-index";
-import { EMPTY_SRS, Scheduler, SrsData } from "./srs/scheduler";
+import { Scheduler, SrsData } from "./srs/scheduler";
 import { STUDY_VIEW, StudyFilter, StudyView } from "./views/study-view";
 import { StudyItem } from "./types";
 
@@ -83,18 +83,9 @@ export default class NotebookLMStudy extends Plugin {
     // --- Persistence --------------------------------------------------------
 
     private async loadPluginData() {
-        const raw = (await this.loadData()) ?? {};
-        if (raw.settings || raw.srs) {
-            const data = raw as Partial<PluginData>;
-            this.settings = Object.assign({}, DEFAULT_SETTINGS, data.settings);
-            this.srs = Object.assign({}, EMPTY_SRS, data.srs);
-        } else {
-            // v1 stored flat CSV-importer settings.
-            this.settings = Object.assign({}, DEFAULT_SETTINGS);
-            if (typeof raw.outputFolder === "string") this.settings.rootFolder = raw.outputFolder;
-            if (typeof raw.openAfterImport === "boolean") this.settings.openAfterImport = raw.openAfterImport;
-            this.srs = { cards: {}, log: [] };
-        }
+        const data = ((await this.loadData()) ?? {}) as Partial<PluginData>;
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, data.settings);
+        this.srs = { cards: data.srs?.cards ?? {}, log: data.srs?.log ?? [] };
     }
 
     private async persist() {

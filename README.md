@@ -81,17 +81,15 @@ Generate flashcards, quizzes or mind maps in NotebookLM's Studio panel first. Th
 
 ### BRAT (recommended)
 1. Install [BRAT](https://github.com/TfTHacker/obsidian42-brat).
-2. Run `BRAT: Plugins: Add a beta plugin for testing` and enter `https://github.com/FranciszekaMateu/obsidian-notebooklm-flashcards`.
+2. Run `BRAT: Plugins: Add a beta plugin for testing` and enter `https://github.com/FranciszekaMateu/obsidian-notebooklm-study`.
 3. Enable **NotebookLM Study**.
 
 ### Manual
-Copy `main.js`, `manifest.json` and `styles.css` from the latest release into `.obsidian/plugins/notebooklm-csv-importer/`, then enable the plugin.
+Copy `main.js`, `manifest.json` and `styles.css` from the latest release into `.obsidian/plugins/notebooklm-study/`, then enable the plugin.
 
-> The plugin id stays `notebooklm-csv-importer` so that existing installs upgrade in place.
+## Coming from NotebookLM CSV Importer
 
-## Upgrading from 1.x
-
-Your output folder becomes the new **Root folder**. Notes created by 1.x use the Spaced Repetition plugin's format and keep working with that plugin; this plugin doesn't schedule them. To move a deck into the new scheduler, import its CSV again.
+This plugin replaces [obsidian-notebooklm-flashcards](https://github.com/FranciszekaMateu/obsidian-notebooklm-flashcards) (NotebookLM CSV Importer), which is now archived. It is installed as a separate plugin: install this one, then disable and remove the old one. Notes created by the old plugin use the Spaced Repetition plugin's format and keep working with that plugin. To move a deck into this plugin's scheduler, import its CSV again.
 
 ## Development
 
