@@ -1,7 +1,7 @@
 {
     "id": "notebooklm-study",
     "name": "NotebookLM Study",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "minAppVersion": "1.7.2",
     "description": "Study NotebookLM flashcards, quizzes and mind maps with FSRS spaced repetition. Sync directly from NotebookLM or import CSV/JSON exports.",
     "author": "FranciszekaMateu",

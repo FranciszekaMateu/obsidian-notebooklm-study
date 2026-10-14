@@ -1,6 +1,7 @@
 import { App, Events, TAbstractFile, TFile } from "obsidian";
+import { clozeGroups } from "../cloze";
 import { parseStudyContent } from "../study-content";
-import { ContentType, StudyItem } from "../types";
+import { ContentType, MEDIA_TYPES, StudyItem } from "../types";
 
 export interface DeckInfo {
     path: string;
@@ -14,7 +15,8 @@ export interface DeckInfo {
     items: StudyItem[];
 }
 
-const TYPES: ContentType[] = ["flashcards", "quiz", "mindmap"];
+const TYPES: ContentType[] = ["flashcards", "quiz", "mindmap", ...MEDIA_TYPES];
+const NO_ITEMS: ContentType[] = ["mindmap", ...MEDIA_TYPES];
 
 /**
  * In-memory list of every note that holds study material: notes created by
@@ -55,18 +57,33 @@ export class DeckIndex extends Events {
         const deck = String(fm?.["nlm-deck"] ?? file.basename);
         const items: StudyItem[] = [];
 
-        if (declared !== "mindmap") {
+        if (!declared || !NO_ITEMS.includes(declared)) {
             const parsed = parseStudyContent(content);
             const seen = new Set<string>();
             for (const card of parsed.cards) {
                 if (seen.has(card.id!)) continue;
                 seen.add(card.id!);
                 items.push({ kind: "flashcard", id: card.id!, path: file.path, deck, line: card.line, card });
+                if (card.reverse && !seen.has(`${card.id}-r`)) {
+                    seen.add(`${card.id}-r`);
+                    items.push({
+                        kind: "flashcard", id: `${card.id}-r`, path: file.path, deck, line: card.line, reversed: true,
+                        card: { ...card, front: card.back, back: card.front },
+                    });
+                }
             }
             for (const question of parsed.questions) {
                 if (seen.has(question.id!)) continue;
                 seen.add(question.id!);
                 items.push({ kind: "quiz", id: question.id!, path: file.path, deck, line: question.line, question });
+            }
+            for (const cloze of parsed.clozes) {
+                for (const group of clozeGroups(cloze.text)) {
+                    const id = `${cloze.id}-c${group}`;
+                    if (seen.has(id)) continue;
+                    seen.add(id);
+                    items.push({ kind: "cloze", id, path: file.path, deck, line: cloze.line, cloze, group });
+                }
             }
         }
 
@@ -76,7 +93,7 @@ export class DeckIndex extends Events {
         }
 
         const type: ContentType = declared
-            ?? (items.some(i => i.kind === "flashcard") ? "flashcards" : "quiz");
+            ?? (items.some(i => i.kind === "quiz") && !items.some(i => i.kind !== "quiz") ? "quiz" : "flashcards");
 
         this.decks.set(file.path, {
             path: file.path,

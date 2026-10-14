@@ -4,17 +4,23 @@ Bring the study material NotebookLM generates — **flashcards, quizzes and mind
 
 ## Features
 
-- **Everything lives in your Markdown.** Flashcards and quiz questions are ordinary callouts (`> [!flashcard]`, `> [!quiz]`). They read fine without the plugin, you can edit them by hand, and you can write them in *any* note: the plugin finds them across the whole vault.
-- **Sync straight from NotebookLM** (desktop) through the [`nlm` CLI](https://github.com/jacob-bd/gemini-notebook-mcp-cli). Browse your notebooks in the side panel, tick the flashcards, quizzes or mind maps you want, and import them. A single **Update** button refreshes every synced note; your own text and your review history are kept.
-- **Import exports from disk** (desktop and mobile): NotebookLM CSV exports, `nlm` JSON downloads, or a Markdown outline for mind maps.
-- **FSRS spaced repetition** (via [ts-fsrs](https://github.com/open-spaced-repetition/ts-fsrs)): Again / Hard / Good / Easy with interval previews, learning steps, daily limits, configurable desired retention, undo.
-- **Quizzes everywhere**: answer quiz callouts right inside the note, practice a whole quiz with a score and *retry missed*, or review the questions with spaced repetition alongside your flashcards.
-- **Integrated UI, no pop-ups**:
-  - a **side panel** with today's numbers, a *Study now* button, the NotebookLM browser, all your decks and file import;
-  - a **toolbar on every study note** with *Study*, *Practice quiz* and *Update from NotebookLM*;
-  - a **status-bar counter** of cards to study (click it to start);
-  - a **dashboard** with card states, a 14-day forecast, a review heatmap and per-deck progress.
-- **Mind maps three ways**: a collapsible tree in the note, an Obsidian **Canvas** laid out as a tree, and a plain nested list that works with Markmap.
+**NotebookLM, from inside Obsidian** (desktop, through the [`nlm` CLI](https://github.com/jacob-bd/gemini-notebook-mcp-cli))
+- **Generate**: right-click a note or folder → *Generate with NotebookLM*. The notes are uploaded as sources and NotebookLM creates flashcards, a quiz, a mind map, an audio overview, a study guide or an infographic, which are then imported automatically.
+- **Ask**: chat with any notebook from the side panel. Answers come with citations; insert them into a note or save them as a flashcard. Select text → right-click → *Ask NotebookLM about this*.
+- **Sync**: browse notebooks and import what you need: flashcards, quizzes, mind maps, audio overviews (with a player), reports, infographics and slide decks. **Automatic sync** can bring in anything new every few hours or at startup.
+
+**Study**
+- **Everything lives in your Markdown.** Flashcards, cloze cards and quiz questions are ordinary callouts that read fine without the plugin, and you can write them in *any* note.
+- **FSRS spaced repetition** (via [ts-fsrs](https://github.com/open-spaced-repetition/ts-fsrs)) with interval previews, daily limits and undo. An **optimizer** fits FSRS to your own review history.
+- **Cloze deletions** (`{{answer}}`, `{{c2::answer::hint}}`) and **reversible flashcards** (studied in both directions).
+- **Quizzes everywhere**: answer them inside the note, practice a whole quiz, review the questions with spaced repetition, or take a **mock exam**: questions from several quizzes, a time limit, a score per topic and *retry mistakes*.
+- **Card browser**: search, filter and sort every card; see its history, stability and recall; suspend, reset or study it.
+- **Dashboard**: card states, 14-day forecast, activity heatmap, retention per deck, recent exams and the topics to reinforce.
+
+**Interface**
+- Side panel, a toolbar on study notes, a status-bar counter. There are no pop-ups.
+- **English and Spanish**: follows Obsidian's language, or choose it in the settings.
+- **Mind maps**: collapsible tree with zoom, drag and full screen, plus the cards related to each node. They are also exported as an Obsidian Canvas and as a Markmap-compatible outline.
 
 ## Note format
 
@@ -29,13 +35,21 @@ Bring the study material NotebookLM generates — **flashcards, quizzes and mind
 > - [x] Mitochondrion
 >
 > **Hint:** Think "powerhouse".
+
+> [!cloze] Cell biology
+> The {{mitochondrion}} makes {{c2::ATP::energy molecule}}.
+
+> [!flashcard|reverse]- Mitochondrion
+> Organelle that produces ATP.
 ````
 
 - The `-` after the type folds the callout, so the answer stays hidden until you open it.
 - Wrong and right options are `- [ ]` / `- [x]`. An indented bullet under an option is its explanation, shown after you answer.
 - Each item gets a stable id from its content. Notes created by the plugin store it in the callout metadata (`> [!flashcard|fc-1a2b3c4d5e]`), which Obsidian hides; review history is keyed on that id.
 - Notes imported from NotebookLM wrap the synced items between `%% nlm:start %%` and `%% nlm:end %%`. Updating replaces only that region. Anything you write outside it is kept. Add `nlm-lock: true` to the frontmatter to stop a note from being updated.
-- Use the **Insert flashcard** and **Insert quiz question** commands to add new items from a template.
+- In a `[!cloze]` callout, each `{{…}}` is a card; `{{cN::…}}` groups deletions into one card, and a third part is a hint. Select text and choose *Turn into cloze card* to make one: **bold** and ==highlighted== text become the gaps.
+- `|reverse` in the callout metadata also creates the back-to-front card.
+- Use the **Insert flashcard**, **Insert reversible flashcard**, **Insert cloze card** and **Insert quiz question** commands to add new items from a template.
 
 Mind maps are an indented list in an `nlm-mindmap` block:
 
@@ -54,16 +68,19 @@ Notes created by 2.0.0 (code-block format) keep working; run **Convert current n
 | Command | |
 |---|---|
 | Open panel | Also the ribbon icon (graduation cap) |
-| Open study dashboard | |
+| Open study dashboard / Open card browser | |
 | Study all due cards | Also the status-bar counter |
 | Study current note / Practice quiz in current note | Also the note toolbar |
-| Insert flashcard / Insert quiz question | |
-| Add from NotebookLM | Desktop only |
-| Update current note / all synced notes from NotebookLM | Desktop only |
+| Start an exam | |
+| Insert flashcard / reversible flashcard / cloze card / quiz question | |
+| Generate study material from current note | Desktop; also right-click a note or folder |
+| Ask a notebook | Desktop; also right-click selected text |
+| Add from NotebookLM / Check NotebookLM for new items | Desktop |
+| Update current note / all synced notes from NotebookLM | Desktop |
 | Import CSV / JSON export | |
-| Convert current note to callout format | For notes created by 2.0.0 |
+| Convert current note / all notes to callout format | For notes created by 2.0.0 |
 
-Review shortcuts: <kbd>Space</kbd> shows the answer (or accepts the suggested grade), <kbd>1</kbd>–<kbd>4</kbd> grade the card, <kbd>A</kbd>–<kbd>H</kbd> answer a quiz question, <kbd>Enter</kbd> moves to the next quiz question, and <kbd>U</kbd> undoes the last grade.
+Review shortcuts: <kbd>Space</kbd> shows the answer (or accepts the suggested grade), <kbd>1</kbd>–<kbd>4</kbd> grade the card, <kbd>A</kbd>–<kbd>H</kbd> answer a quiz question, <kbd>Enter</kbd> moves to the next quiz question, <kbd>U</kbd> undoes the last grade, and in an exam <kbd>←</kbd>/<kbd>→</kbd> move between questions.
 
 ## Setting up NotebookLM sync
 

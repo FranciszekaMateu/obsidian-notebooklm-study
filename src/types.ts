@@ -1,9 +1,14 @@
-export type ContentType = "flashcards" | "quiz" | "mindmap";
+/** Study notes hold flashcards / quizzes / mind maps; media notes wrap other NotebookLM outputs. */
+export type ContentType = "flashcards" | "quiz" | "mindmap" | MediaType;
+export type MediaType = "audio" | "report" | "infographic" | "slides";
+export const MEDIA_TYPES: MediaType[] = ["audio", "report", "infographic", "slides"];
 
 export interface Flashcard {
     id?: string;
     front: string;
     back: string;
+    /** Also study it back-to-front (adds a second item with id "<id>-r"). */
+    reverse?: boolean;
 }
 
 export interface QuizOption {
@@ -17,6 +22,13 @@ export interface QuizQuestion {
     question: string;
     options: QuizOption[];
     hint?: string;
+}
+
+/** A cloze note: text with {{deletions}}; each deletion group becomes one card. */
+export interface ClozeNote {
+    id?: string;
+    title: string;
+    text: string;
 }
 
 export interface MindMapNode {
@@ -37,7 +49,32 @@ export interface NoteOrigin {
     source: "notebooklm" | "file";
 }
 
-/** A reviewable item found in the vault. Quiz questions are reviewable too. */
+interface ItemBase {
+    id: string;
+    path: string;
+    deck: string;
+    line?: number;
+}
+
+/** A reviewable item found in the vault. */
 export type StudyItem =
-    | { kind: "flashcard"; id: string; path: string; deck: string; line?: number; card: Flashcard }
-    | { kind: "quiz"; id: string; path: string; deck: string; line?: number; question: QuizQuestion };
+    | (ItemBase & { kind: "flashcard"; card: Flashcard; reversed?: boolean })
+    | (ItemBase & { kind: "quiz"; question: QuizQuestion })
+    | (ItemBase & { kind: "cloze"; cloze: ClozeNote; group: number });
+
+/** Plain-text prompt of an item, for lists and search. */
+export function itemPrompt(item: StudyItem): string {
+    switch (item.kind) {
+        case "flashcard": return item.card.front;
+        case "quiz": return item.question.question;
+        case "cloze": return item.cloze.text;
+    }
+}
+
+export function itemAnswer(item: StudyItem): string {
+    switch (item.kind) {
+        case "flashcard": return item.card.back;
+        case "quiz": return item.question.options.filter(o => o.correct).map(o => o.text).join(" / ");
+        case "cloze": return item.cloze.text;
+    }
+}

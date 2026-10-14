@@ -1,9 +1,9 @@
 import { flashcardId, quizId } from "./ids";
 import { region, serializeCallouts } from "./callouts";
 import { toOutline } from "./mindmap";
-import { ContentType, Flashcard, MindMapNode, NoteOrigin, QuizQuestion } from "./types";
+import { ContentType, Flashcard, MediaType, MindMapNode, NoteOrigin, QuizQuestion } from "./types";
 
-export const BLOCK_LANG: Record<ContentType, string> = {
+export const BLOCK_LANG: Record<"flashcards" | "quiz" | "mindmap", string> = {
     flashcards: "nlm-flashcards",
     quiz: "nlm-quiz",
     mindmap: "nlm-mindmap",
@@ -229,7 +229,7 @@ export function touchSynced(content: string): string {
  * Replace the managed block (and refresh nlm-synced) while keeping anything
  * the user wrote around it. Returns null when the note has no such block.
  */
-export function replaceBlock(content: string, type: ContentType, body: string): string | null {
+export function replaceBlock(content: string, type: keyof typeof BLOCK_LANG, body: string): string | null {
     const block = findBlock(content, BLOCK_LANG[type]);
     if (!block) return null;
     const updated = content.slice(0, block.start) + fence(BLOCK_LANG[type], body) + content.slice(block.end);
@@ -250,4 +250,13 @@ export function carryOverIds<T extends { id?: string }>(fresh: T[], existing: T[
 
 function normalizeKey(s: string): string {
     return s.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/** Note wrapping an audio overview, report, infographic or slide deck. */
+export function buildMediaNote(type: MediaType, opts: NoteOptions, embedPath: string | null, text = ""): string {
+    const parts = [frontmatter(type, opts), "", `# ${opts.title}`, ""];
+    if (embedPath) parts.push(`![[${embedPath}]]`, "");
+    // Reports are Markdown already; drop a leading H1 that repeats the title.
+    if (text) parts.push(text.replace(/^#\s+.*\n+/, "").trim(), "");
+    return parts.join("\n");
 }

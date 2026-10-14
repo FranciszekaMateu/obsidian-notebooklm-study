@@ -1,0 +1,113 @@
+{
+  "title": "Fotosíntesis Tarjetas",
+  "cards": [
+    {
+      "front": {
+        "flashcardContentBlock": [
+          {
+            "type": "text",
+            "content": "¿En qué tipo de energía se transforma la luz solar mediante la fotosíntesis?"
+          }
+        ]
+      },
+      "back": {
+        "flashcardContentBlock": [
+          {
+            "type": "text",
+            "content": "Energía química"
+          }
+        ]
+      }
+    },
+    {
+      "front": {
+        "flashcardContentBlock": [
+          {
+            "type": "text",
+            "content": "¿En qué organelo celular de las plantas se realiza el proceso de la fotosíntesis?"
+          }
+        ]
+      },
+      "back": {
+        "flashcardContentBlock": [
+          {
+            "type": "text",
+            "content": "En los cloroplastos"
+          }
+        ]
+      }
+    },
+    {
+      "front": {
+        "flashcardContentBlock": [
+          {
+            "type": "text",
+            "content": "¿Qué colores de la luz absorbe principalmente la clorofila?"
+          }
+        ]
+      },
+      "back": {
+        "flashcardContentBlock": [
+          {
+            "type": "text",
+            "content": "Luz roja y luz azul"
+          }
+        ]
+      }
+    },
+    {
+      "front": {
+        "flashcardContentBlock": [
+          {
+            "type": "text",
+            "content": "¿Cuáles son los reactivos inorgánicos iniciales requeridos para llevar a cabo la fotosíntesis?"
+          }
+        ]
+      },
+      "back": {
+        "flashcardContentBlock": [
+          {
+            "type": "text",
+            "content": "Dióxido de carbono ($CO_2$) y agua ($H_2O$)"
+          }
+        ]
+      }
+    },
+    {
+      "front": {
+        "flashcardContentBlock": [
+          {
+            "type": "text",
+            "content": "¿Cuáles son los dos productos finales generados durante la fotosíntesis?"
+          }
+        ]
+      },
+      "back": {
+        "flashcardContentBlock": [
+          {
+            "type": "text",
+            "content": "Glucosa y oxígeno ($O_2$)"
+          }
+        ]
+      }
+    },
+    {
+      "front": {
+        "flashcardContentBlock": [
+          {
+            "type": "text",
+            "content": "El pigmento presente en los cloroplastos encarga de absorber la luz para la fotosíntesis se llama _____."
+          }
+        ]
+      },
+      "back": {
+        "flashcardContentBlock": [
+          {
+            "type": "text",
+            "content": "Clorofila"
+          }
+        ]
+      }
+    }
+  ]
+}

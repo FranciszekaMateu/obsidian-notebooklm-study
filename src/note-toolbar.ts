@@ -1,4 +1,6 @@
 import { MarkdownView, Platform, TFile, setIcon } from "obsidian";
+import { kindLabel } from "./generate";
+import { t, tn } from "./i18n";
 import type NotebookLMStudy from "./main";
 
 const TOOLBAR_CLS = "nlm-note-toolbar";
@@ -48,50 +50,65 @@ export class NoteToolbars {
         const p = this.plugin;
         const info = bar.createDiv({ cls: "nlm-tb-info" });
 
-        if (deck.type === "mindmap") {
-            setIcon(info.createSpan({ cls: "nlm-tb-icon" }), "network");
-            info.createSpan({ cls: "nlm-tb-title", text: "Mind map" });
+        if (!deck.items.length) {
+            // Mind maps and media notes.
+            const icon = { mindmap: "network", audio: "audio-lines", report: "file-text", infographic: "image", slides: "presentation" }[deck.type as string] ?? "file";
+            setIcon(info.createSpan({ cls: "nlm-tb-icon" }), icon);
+            info.createSpan({ cls: "nlm-tb-title", text: kindLabel(deck.type === "mindmap" ? "mind_map" : deck.type === "slides" ? "slide_deck" : deck.type) });
+            if (deck.notebookTitle) info.createSpan({ cls: "nlm-muted", text: deck.notebookTitle });
             const actions = bar.createDiv({ cls: "nlm-tb-actions" });
-            const canvas = file.path.replace(/\.md$/, ".canvas");
-            if (p.app.vault.getAbstractFileByPath(canvas)) {
-                button(actions, "layout-dashboard", "Open canvas", () => void p.app.workspace.openLinkText(canvas, file.path, "tab"));
+            const canvas = file.path.replace(/.md$/, ".canvas");
+            if (deck.type === "mindmap" && p.app.vault.getAbstractFileByPath(canvas)) {
+                button(actions, "layout-dashboard", t("Open canvas"), () => void p.app.workspace.openLinkText(canvas, file.path, "tab"));
             }
-            this.syncButton(actions, file);
+            this.askButton(actions, file);
+            if (deck.type === "mindmap") this.syncButton(actions, file);
             return;
         }
 
-        const cards = deck.items.filter(i => i.kind === "flashcard").length;
-        const questions = deck.items.filter(i => i.kind === "quiz").length;
+        const count = (k: string) => deck.items.filter(i => i.kind === k).length;
+        const questions = count("quiz");
         const studyable = p.filterStudyable(deck.items);
         const c = p.stateCounts(studyable.map(i => i.id));
 
         setIcon(info.createSpan({ cls: "nlm-tb-icon" }), "graduation-cap");
         const parts: string[] = [];
-        if (cards) parts.push(`${cards} flashcard${cards === 1 ? "" : "s"}`);
-        if (questions) parts.push(`${questions} quiz question${questions === 1 ? "" : "s"}`);
+        if (count("flashcard")) parts.push(tn(count("flashcard"), "{n} flashcard", "{n} flashcards"));
+        if (count("cloze")) parts.push(tn(count("cloze"), "{n} cloze", "{n} clozes"));
+        if (questions) parts.push(tn(questions, "{n} quiz question", "{n} quiz questions"));
         info.createSpan({ cls: "nlm-tb-title", text: parts.join(" · ") });
 
         const chips = info.createDiv({ cls: "nlm-chips" });
-        chip(chips, "new", c.fresh, "New");
-        chip(chips, "learning", c.learning, "Learning");
-        chip(chips, "due", c.due, "Due");
+        chip(chips, "new", c.fresh, t("New"));
+        chip(chips, "learning", c.learning, t("Learning"));
+        chip(chips, "due", c.due, t("Due"));
 
         if (studyable.length) {
             const pct = Math.round((c.review / studyable.length) * 100);
-            const progress = info.createDiv({ cls: "nlm-mini-progress", attr: { "aria-label": `${pct}% learned` } });
+            const progress = info.createDiv({ cls: "nlm-mini-progress", attr: { "aria-label": t("{pct}% learned", { pct }) } });
             progress.createDiv({ cls: "nlm-mini-progress-bar" }).style.width = `${pct}%`;
         }
 
         const actions = bar.createDiv({ cls: "nlm-tb-actions" });
         if (studyable.length) {
             const n = c.due + c.learning + Math.min(c.fresh, p.newLeftToday());
-            const study = button(actions, "play", n ? `Study (${n})` : "Study", () => void p.openStudy({ path: file.path }));
+            const study = button(actions, "play", n ? t("Study ({n})", { n }) : t("Study"), () => void p.openStudy({ path: file.path }));
             study.addClass("mod-cta");
         }
         if (questions) {
-            button(actions, "list-checks", "Practice quiz", () => void p.openQuizPractice(file.path));
+            button(actions, "list-checks", t("Practice quiz"), () => void p.openQuizPractice(file.path));
+            button(actions, "timer", t("Exam"), () => void p.openExamSetup([file.path]));
         }
+        this.askButton(actions, file);
         this.syncButton(actions, file);
+    }
+
+    /** Generate / ask buttons for notes linked to a notebook (desktop only). */
+    private askButton(actions: HTMLElement, file: TFile) {
+        const deck = this.plugin.index.decks.get(file.path);
+        if (!Platform.isDesktopApp || !deck?.notebookId) return;
+        const b = button(actions, "message-circle", "", () => void this.plugin.openSidebar("ask"));
+        b.setAttr("aria-label", t("Ask this notebook"));
     }
 
     private syncButton(actions: HTMLElement, file: TFile) {
@@ -104,7 +121,7 @@ export class NoteToolbars {
             b.removeClass("is-loading");
             b.disabled = false;
         });
-        b.setAttr("aria-label", "Update from NotebookLM");
+        b.setAttr("aria-label", t("Update from NotebookLM"));
     }
 }
 

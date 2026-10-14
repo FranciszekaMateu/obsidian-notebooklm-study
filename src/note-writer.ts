@@ -2,14 +2,14 @@ import { App, TFile, TFolder, normalizePath } from "obsidian";
 import { safeFileName } from "./ids";
 import { region, replaceRegion, serializeCallouts } from "./callouts";
 import {
-    BLOCK_LANG, NoteOptions, buildFlashcardsNote, buildMindMapNote, buildQuizNote, carryOverIds,
+    BLOCK_LANG, NoteOptions, buildFlashcardsNote, buildMediaNote, buildMindMapNote, buildQuizNote, carryOverIds,
     findBlock, replaceBlock, touchSynced,
 } from "./notes";
 import { convertLegacyContent, parseStudyContent } from "./study-content";
 import { toOutline, toCanvas } from "./mindmap";
 import type { DeckIndex } from "./srs/deck-index";
 import type { NotebookLMStudySettings } from "./settings";
-import { NoteOrigin, ParsedContent } from "./types";
+import { MediaType, NoteOrigin, ParsedContent } from "./types";
 
 export interface WriteRequest {
     content: ParsedContent;
@@ -63,6 +63,38 @@ export class NoteWriter {
 
         const file = await this.app.vault.create(path, body);
         return { file, created: true, count };
+    }
+
+    /**
+     * Save an audio overview / report / infographic / slide deck. The file goes
+     * next to the note (or into the attachments folder) and the note embeds it.
+     * NotebookLM artifacts never change, so an already imported one is returned as is.
+     */
+    async writeMedia(req: { type: MediaType; title: string; origin: NoteOrigin; data: ArrayBuffer; ext: string }): Promise<WriteResult> {
+        const existing = req.origin.artifactId
+            && this.index.list(req.type).find(d => d.artifactId === req.origin.artifactId);
+        const existingFile = existing && this.app.vault.getAbstractFileByPath(existing.path);
+        if (existingFile instanceof TFile) return { file: existingFile, created: false, count: 1 };
+
+        const folder = this.folderFor(req.origin);
+        await this.ensureFolder(folder);
+        const base = safeFileName(req.title);
+        const opts: NoteOptions = { title: req.title, deck: req.origin.notebookTitle ?? req.title, origin: req.origin };
+
+        let body: string;
+        if (req.type === "report") {
+            body = buildMediaNote("report", opts, null, new TextDecoder("utf-8").decode(req.data));
+        } else {
+            const mediaFolder = this.settings.attachmentsFolder
+                ? normalizePath(this.settings.attachmentsFolder)
+                : folder;
+            await this.ensureFolder(mediaFolder);
+            const mediaPath = this.uniquePath(mediaFolder, base, req.ext);
+            await this.app.vault.createBinary(mediaPath, req.data);
+            body = buildMediaNote(req.type, opts, mediaPath);
+        }
+        const file = await this.app.vault.create(this.uniquePath(folder, base, "md"), body);
+        return { file, created: true, count: 1 };
     }
 
     /** A note previously imported from the same artifact, or (for file imports) a note of the same type at the target path. */

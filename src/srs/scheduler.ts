@@ -1,4 +1,4 @@
-import { Card, FSRS, Grade, Rating, State, createEmptyCard, fsrs, generatorParameters } from "ts-fsrs";
+import { Card, FSRS, Grade, Rating, State, createEmptyCard, fsrs, generatorParameters, migrateParameters } from "ts-fsrs";
 
 /** Card state as persisted in data.json (dates as epoch ms). */
 export interface StoredCard {
@@ -23,12 +23,27 @@ export interface ReviewEntry {
     state: State;
 }
 
+export interface ExamResult {
+    /** Finish time, epoch ms. */
+    t: number;
+    durationMs: number;
+    correct: number;
+    total: number;
+    /** Per note path: correct / total. */
+    byNote: Record<string, { correct: number; total: number }>;
+}
+
 export interface SrsData {
     cards: Record<string, StoredCard>;
     log: ReviewEntry[];
+    /** Cards left out of every session until unsuspended. */
+    suspended: Record<string, true>;
+    exams: ExamResult[];
 }
 
-export const EMPTY_SRS: SrsData = { cards: {}, log: [] };
+export function emptySrs(): SrsData {
+    return { cards: {}, log: [], suspended: {}, exams: [] };
+}
 
 export interface SchedulerOptions {
     desiredRetention: number;
@@ -36,6 +51,8 @@ export interface SchedulerOptions {
     enableFuzz: boolean;
     /** Hour at which a new study day begins (like Anki's "next day starts at"). */
     dayStartHour: number;
+    /** Optimized FSRS weights; empty means the defaults. */
+    weights?: number[];
 }
 
 export interface UndoToken {
@@ -44,7 +61,7 @@ export interface UndoToken {
     logLength: number;
 }
 
-const MAX_LOG = 20000;
+const MAX_LOG = 50000;
 const DAY = 24 * 60 * 60 * 1000;
 
 export const GRADES: Grade[] = [Rating.Again, Rating.Hard, Rating.Good, Rating.Easy];
@@ -68,8 +85,34 @@ export class Scheduler {
                 maximum_interval: this.opts.maximumInterval,
                 enable_fuzz: this.opts.enableFuzz,
                 enable_short_term: true,
+                ...(this.opts.weights?.length ? { w: migrateParameters(this.opts.weights) } : {}),
             })
         );
+    }
+
+    get weights(): readonly number[] {
+        return this.f.parameters.w;
+    }
+
+    isSuspended(id: string): boolean {
+        return !!this.data.suspended[id];
+    }
+
+    setSuspended(id: string, suspended: boolean) {
+        if (suspended) this.data.suspended[id] = true;
+        else delete this.data.suspended[id];
+    }
+
+    /** Review log entries of one card, oldest first. */
+    history(id: string): ReviewEntry[] {
+        return this.data.log.filter(e => e.id === id);
+    }
+
+    /** Current probability of recall (0..1), or null for new cards. */
+    retrievability(id: string, now = Date.now()): number | null {
+        const s = this.data.cards[id];
+        if (!s || s.state === State.New) return null;
+        return this.f.get_retrievability(fromStored(s), new Date(now), false);
     }
 
     has(id: string): boolean {

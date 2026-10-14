@@ -1,4 +1,5 @@
 import { Flashcard, MindMapNode, ParsedContent, QuizOption, QuizQuestion } from "../types";
+import { richText } from "./rich-text";
 
 /**
  * Parses the JSON shapes the `nlm` CLI writes, plus the raw NotebookLM
@@ -83,7 +84,7 @@ function isObject(v: unknown): v is Record<string, unknown> {
 }
 
 function str(v: unknown): string {
-    return typeof v === "string" ? v.trim() : "";
+    return richText(v);
 }
 
 function isPresent<T>(v: T | null): v is T {

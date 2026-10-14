@@ -1,12 +1,12 @@
 {
     "name": "obsidian-notebooklm-study",
-    "version": "2.1.0",
+    "version": "2.2.0",
     "description": "Study NotebookLM flashcards, quizzes and mind maps in Obsidian with FSRS spaced repetition.",
     "main": "main.js",
     "scripts": {
         "dev": "node esbuild.config.mjs",
         "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-        "test": "esbuild tests/core.test.ts --bundle --platform=node --outfile=.test-build/core.test.js --log-level=warning && node --test .test-build/core.test.js"
+        "test": "esbuild tests/*.test.ts --bundle --platform=node --outdir=.test-build --log-level=warning && node --test .test-build/core.test.js .test-build/features.test.js"
     },
     "keywords": [
         "obsidian",
