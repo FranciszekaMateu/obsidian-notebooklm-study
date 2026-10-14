@@ -1,5 +1,5 @@
 import { App, Events, TAbstractFile, TFile } from "obsidian";
-import { BLOCK_LANG, findBlock, parseFlashcards, parseQuiz } from "../notes";
+import { parseStudyContent } from "../study-content";
 import { ContentType, StudyItem } from "../types";
 
 export interface DeckInfo {
@@ -8,15 +8,19 @@ export interface DeckInfo {
     deck: string;
     title: string;
     notebookId?: string;
+    notebookTitle?: string;
     artifactId?: string;
+    synced?: string;
     items: StudyItem[];
 }
 
 const TYPES: ContentType[] = ["flashcards", "quiz", "mindmap"];
 
 /**
- * Keeps an in-memory list of every note whose frontmatter has `nlm-type`.
- * Emits "changed" whenever the set of decks or their items changes.
+ * In-memory list of every note that holds study material: notes created by
+ * the plugin (frontmatter `nlm-type`) and any note with flashcard / quiz
+ * callouts written by hand. Emits "changed" when that set changes and
+ * "reviewed" (triggered by the study view) after each answer.
  */
 export class DeckIndex extends Events {
     decks = new Map<string, DeckInfo>();
@@ -36,54 +40,75 @@ export class DeckIndex extends Events {
     }
 
     async indexFile(file: TFile, notify = true) {
-        const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-        const type = fm?.["nlm-type"] as ContentType | undefined;
-        if (!type || !TYPES.includes(type)) {
-            if (this.decks.delete(file.path) && notify) this.trigger("changed");
+        const cache = this.app.metadataCache.getFileCache(file);
+        const fm = cache?.frontmatter;
+        const fmType = fm?.["nlm-type"] as ContentType | undefined;
+        const declared = fmType && TYPES.includes(fmType) ? fmType : undefined;
+        const hasCallouts = cache?.sections?.some(s => s.type === "callout") ?? false;
+
+        if (!declared && !hasCallouts) {
+            this.drop(file.path, notify);
             return;
         }
 
         const content = await this.app.vault.cachedRead(file);
         const deck = String(fm?.["nlm-deck"] ?? file.basename);
-        const info: DeckInfo = {
+        const items: StudyItem[] = [];
+
+        if (declared !== "mindmap") {
+            const parsed = parseStudyContent(content);
+            const seen = new Set<string>();
+            for (const card of parsed.cards) {
+                if (seen.has(card.id!)) continue;
+                seen.add(card.id!);
+                items.push({ kind: "flashcard", id: card.id!, path: file.path, deck, line: card.line, card });
+            }
+            for (const question of parsed.questions) {
+                if (seen.has(question.id!)) continue;
+                seen.add(question.id!);
+                items.push({ kind: "quiz", id: question.id!, path: file.path, deck, line: question.line, question });
+            }
+        }
+
+        if (!declared && !items.length) {
+            this.drop(file.path, notify);
+            return;
+        }
+
+        const type: ContentType = declared
+            ?? (items.some(i => i.kind === "flashcard") ? "flashcards" : "quiz");
+
+        this.decks.set(file.path, {
             path: file.path,
             type,
             deck,
             title: file.basename,
             notebookId: fm?.["nlm-notebook"],
+            notebookTitle: fm?.["nlm-notebook-title"],
             artifactId: fm?.["nlm-artifact"],
-            items: [],
-        };
-
-        const block = findBlock(content, BLOCK_LANG[type]);
-        if (block && type === "flashcards") {
-            info.items = dedupe(parseFlashcards(block.body).map(card => ({
-                kind: "flashcard" as const, id: card.id as string, path: file.path, deck, card,
-            })));
-        } else if (block && type === "quiz") {
-            info.items = dedupe(parseQuiz(block.body).map(question => ({
-                kind: "quiz" as const, id: question.id as string, path: file.path, deck, question,
-            })));
-        }
-
-        this.decks.set(file.path, info);
+            synced: fm?.["nlm-synced"],
+            items,
+        });
         if (notify) this.trigger("changed");
     }
 
+    private drop(path: string, notify: boolean) {
+        if (this.decks.delete(path) && notify) this.trigger("changed");
+    }
+
     remove(file: TAbstractFile) {
-        if (this.decks.delete(file.path)) this.trigger("changed");
+        this.drop(file.path, true);
     }
 
     rename(file: TAbstractFile, oldPath: string) {
-        const info = this.decks.get(oldPath);
-        if (!info) return;
         this.decks.delete(oldPath);
-        if (file instanceof TFile) void this.indexFile(file);
+        if (file instanceof TFile && file.extension === "md") void this.indexFile(file);
+        else this.trigger("changed");
     }
 
     list(type?: ContentType): DeckInfo[] {
         const all = [...this.decks.values()];
-        return (type ? all.filter(d => d.type === type) : all).sort((a, b) => a.deck.localeCompare(b.deck));
+        return (type ? all.filter(d => d.type === type) : all).sort((a, b) => a.deck.localeCompare(b.deck) || a.title.localeCompare(b.title));
     }
 
     items(filter?: (d: DeckInfo) => boolean): StudyItem[] {
@@ -93,10 +118,4 @@ export class DeckIndex extends Events {
         }
         return out;
     }
-}
-
-/** Two identical cards in one note would share an id; keep the first. */
-function dedupe<T extends { id: string }>(items: T[]): T[] {
-    const seen = new Set<string>();
-    return items.filter(i => (seen.has(i.id) ? false : (seen.add(i.id), true)));
 }

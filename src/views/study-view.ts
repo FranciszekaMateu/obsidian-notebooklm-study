@@ -1,10 +1,10 @@
-import { Component, ItemView, MarkdownRenderer, Platform, WorkspaceLeaf, setIcon } from "obsidian";
+import { Component, ItemView, MarkdownRenderer, Platform, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import { Grade, Rating, State } from "ts-fsrs";
 import { renderQuizQuestion } from "../blocks";
 import type NotebookLMStudy from "../main";
 import { DeckInfo } from "../srs/deck-index";
 import { GRADES, UndoToken, formatInterval } from "../srs/scheduler";
-import { StudyItem } from "../types";
+import { QuizQuestion, StudyItem } from "../types";
 
 export const STUDY_VIEW = "nlm-study-view";
 
@@ -16,6 +16,7 @@ export interface StudyFilter {
 }
 
 const LEARN_AHEAD_MS = 20 * 60 * 1000;
+const MATURE_DAYS = 21;
 const GRADE_LABEL: Record<Grade, string> = {
     [Rating.Again]: "Again",
     [Rating.Hard]: "Hard",
@@ -25,6 +26,8 @@ const GRADE_LABEL: Record<Grade, string> = {
 
 interface Session {
     filter: StudyFilter;
+    title: string;
+    total: number;
     queue: StudyItem[];
     learning: { item: StudyItem; due: number }[];
     current: StudyItem | null;
@@ -33,10 +36,24 @@ interface Session {
     answerWith?: (i: number) => void;
     history: { item: StudyItem; token: UndoToken }[];
     done: number;
+    again: number;
+}
+
+interface QuizRun {
+    path: string;
+    title: string;
+    questions: QuizQuestion[];
+    order: number[];
+    pos: number;
+    correct: number;
+    missed: number[];
+    answered: boolean;
+    answerWith?: (i: number) => void;
 }
 
 export class StudyView extends ItemView {
     private session: Session | null = null;
+    private quiz: QuizRun | null = null;
     private cardComponent: Component | null = null;
 
     constructor(leaf: WorkspaceLeaf, private plugin: NotebookLMStudy) {
@@ -44,13 +61,13 @@ export class StudyView extends ItemView {
     }
 
     getViewType() { return STUDY_VIEW; }
-    getDisplayText() { return "NotebookLM study"; }
+    getDisplayText() { return this.session ? "Review" : this.quiz ? "Quiz" : "Study dashboard"; }
     getIcon() { return "graduation-cap"; }
 
     async onOpen() {
         this.contentEl.addClass("nlm-study");
         this.registerEvent(this.plugin.index.on("changed", () => {
-            if (!this.session) this.renderDashboard();
+            if (!this.session && !this.quiz) this.renderDashboard();
         }));
         this.registerDomEvent(this.contentEl, "keydown", e => this.onKey(e));
         this.contentEl.tabIndex = 0;
@@ -61,123 +78,220 @@ export class StudyView extends ItemView {
         this.cardComponent?.unload();
     }
 
+    private freshComponent(): Component {
+        this.cardComponent?.unload();
+        this.cardComponent = new Component();
+        this.cardComponent.load();
+        return this.cardComponent;
+    }
+
     // --- Dashboard ----------------------------------------------------------
 
     renderDashboard() {
         this.session = null;
+        this.quiz = null;
         this.cardComponent?.unload();
         this.cardComponent = null;
+        const p = this.plugin;
         const el = this.contentEl;
         el.empty();
+        const page = el.createDiv({ cls: "nlm-page" });
 
-        const header = el.createDiv({ cls: "nlm-dash-header" });
-        header.createEl("h2", { text: "NotebookLM study" });
+        const header = page.createDiv({ cls: "nlm-dash-header" });
+        const titleWrap = header.createDiv();
+        titleWrap.createEl("h2", { text: "Study dashboard" });
+        titleWrap.createDiv({ cls: "nlm-muted", text: new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }) });
         const actions = header.createDiv({ cls: "nlm-actions" });
-        if (Platform.isDesktopApp) {
-            const sync = actions.createEl("button", { text: "Sync from NotebookLM" });
-            setIcon(sync.createSpan({ cls: "nlm-btn-icon" }), "refresh-cw");
-            sync.onclick = () => this.plugin.openSyncModal();
-        }
-        actions.createEl("button", { text: "Import file" }).onclick = () => this.plugin.openImportModal();
+        iconButton(actions, "panel-right", "Open panel", () => void p.openSidebar());
+        if (Platform.isDesktopApp) iconButton(actions, "cloud-download", "Add from NotebookLM", () => void p.openSidebar("sync"));
 
-        if (!this.plugin.index.ready) {
-            el.createDiv({ cls: "nlm-empty", text: "Indexing vault…" });
+        if (!p.index.ready) {
+            page.createDiv({ cls: "nlm-empty", text: "Indexing vault…" });
             return;
         }
 
-        const decks = this.plugin.index.list();
-        const studyable = this.plugin.studyableItems();
-        const ids = studyable.map(i => i.id);
-        const avail = this.plugin.countAvailable(studyable);
-        const stats = this.plugin.scheduler.stats();
+        const items = p.studyableItems();
+        const ids = items.map(i => i.id);
+        const c = p.stateCounts(ids);
+        const stats = p.scheduler.stats();
+        const newToday = Math.min(c.fresh, p.newLeftToday());
+        const todo = c.due + c.learning + newToday;
 
-        const tiles = el.createDiv({ cls: "nlm-tiles" });
-        tile(tiles, "Due today", String(avail.due));
-        tile(tiles, "New today", String(avail.fresh));
-        tile(tiles, "Reviewed today", String(stats.reviewedToday));
-        tile(tiles, "Retention (30d)", stats.retention30d === null ? "—" : `${Math.round(stats.retention30d * 100)}%`);
-        tile(tiles, "Streak", `${stats.streak} ${stats.streak === 1 ? "day" : "days"}`);
-
-        const studyAll = el.createEl("button", {
-            cls: "mod-cta nlm-study-all",
-            text: avail.due + avail.fresh > 0 ? `Study now (${avail.due + avail.fresh})` : "Nothing due — study ahead",
+        // Hero: what to do now.
+        const hero = page.createDiv({ cls: "nlm-hero" });
+        const heroText = hero.createDiv({ cls: "nlm-hero-text" });
+        heroText.createDiv({ cls: "nlm-hero-number", text: String(todo) });
+        heroText.createDiv({
+            cls: "nlm-hero-label",
+            text: todo ? `cards to study today · ${c.due} review · ${c.learning} learning · ${newToday} new` : items.length ? "You're all caught up for today" : "No cards yet",
         });
-        studyAll.onclick = () => this.startSession({});
+        const start = hero.createEl("button", { cls: "mod-cta nlm-hero-btn" });
+        setIcon(start.createSpan({ cls: "nlm-btn-icon" }), "play");
+        start.createSpan({ text: todo ? "Start review" : "Study ahead" });
+        start.disabled = !items.length;
+        start.onclick = () => this.startSession({});
 
-        this.renderForecast(el, ids);
+        const tiles = page.createDiv({ cls: "nlm-tiles" });
+        tile(tiles, "check-circle", String(stats.reviewedToday), "reviewed today",
+            stats.accuracyToday === null ? "" : `${Math.round(stats.accuracyToday * 100)}% correct`);
+        tile(tiles, "target", stats.retention30d === null ? "—" : `${Math.round(stats.retention30d * 100)}%`, "retention (30 days)",
+            `goal ${Math.round(p.settings.desiredRetention * 100)}%`);
+        tile(tiles, "flame", String(stats.streak), stats.streak === 1 ? "day streak" : "days streak", "");
+        tile(tiles, "layers", String(items.length), "cards in total",
+            `${p.index.list().filter(d => d.items.length).length} notes`);
 
-        if (!decks.length) {
-            const empty = el.createDiv({ cls: "nlm-empty" });
-            empty.createEl("p", { text: "No NotebookLM content yet." });
-            empty.createEl("p", {
-                text: Platform.isDesktopApp
-                    ? "Sync a notebook with the nlm CLI, or import a CSV/JSON export."
-                    : "Import a CSV/JSON export, or sync from the desktop app.",
-            });
+        if (!items.length) {
+            this.renderEmpty(page);
             return;
         }
 
-        // Group notes under their deck name.
+        const grid = page.createDiv({ cls: "nlm-dash-grid" });
+        this.renderStates(grid.createDiv({ cls: "nlm-panel" }), ids);
+        this.renderForecast(grid.createDiv({ cls: "nlm-panel" }), ids);
+        this.renderHeatmap(page.createDiv({ cls: "nlm-panel" }));
+        this.renderDeckTable(page.createDiv({ cls: "nlm-panel" }));
+    }
+
+    private renderEmpty(page: HTMLElement) {
+        const empty = page.createDiv({ cls: "nlm-panel nlm-empty-state" });
+        setIcon(empty.createDiv({ cls: "nlm-empty-icon" }), "sparkles");
+        empty.createEl("h3", { text: "Bring in your first deck" });
+        empty.createEl("p", { text: "Import flashcards, quizzes or mind maps from NotebookLM, or write cards yourself in any note:" });
+        empty.createEl("pre", { text: "> [!flashcard]- What is a perceptron?\n> A single artificial neuron." });
+        const row = empty.createDiv({ cls: "nlm-actions" });
+        if (Platform.isDesktopApp) row.createEl("button", { cls: "mod-cta", text: "Add from NotebookLM" }).onclick = () => void this.plugin.openSidebar("sync");
+        row.createEl("button", { text: "Import a file" }).onclick = () => void this.plugin.openSidebar("import");
+    }
+
+    private renderStates(panel: HTMLElement, ids: string[]) {
+        panel.createDiv({ cls: "nlm-panel-title", text: "Card states" });
+        let fresh = 0, learning = 0, young = 0, mature = 0;
+        for (const id of ids) {
+            const s = this.plugin.scheduler.stored(id);
+            if (!s || s.state === State.New) fresh++;
+            else if (s.state !== State.Review) learning++;
+            else if (s.scheduled_days >= MATURE_DAYS) mature++;
+            else young++;
+        }
+        const total = ids.length || 1;
+        const parts: [string, string, number][] = [
+            ["new", "New", fresh], ["learning", "Learning", learning], ["young", "Young", young], ["mature", "Mature", mature],
+        ];
+        const bar = panel.createDiv({ cls: "nlm-stack" });
+        for (const [cls, label, n] of parts) {
+            if (!n) continue;
+            const seg = bar.createDiv({ cls: `nlm-stack-seg nlm-seg-${cls}`, attr: { "aria-label": `${label}: ${n}` } });
+            seg.style.width = `${(n / total) * 100}%`;
+        }
+        const legend = panel.createDiv({ cls: "nlm-legend" });
+        for (const [cls, label, n] of parts) {
+            const item = legend.createDiv({ cls: "nlm-legend-item" });
+            item.createSpan({ cls: `nlm-legend-dot nlm-seg-${cls}` });
+            item.createSpan({ text: label });
+            item.createSpan({ cls: "nlm-legend-value", text: `${n} · ${Math.round((n / total) * 100)}%` });
+        }
+        panel.createDiv({ cls: "nlm-muted nlm-small", text: `Mature cards have an interval of ${MATURE_DAYS} days or more.` });
+    }
+
+    private renderForecast(panel: HTMLElement, ids: string[]) {
+        const days = 14;
+        const data = this.plugin.scheduler.forecast(ids, days);
+        panel.createDiv({ cls: "nlm-panel-title", text: "Upcoming reviews" });
+        const max = Math.max(1, ...data);
+        const bars = panel.createDiv({ cls: "nlm-forecast-bars" });
+        const today = new Date();
+        data.forEach((n, i) => {
+            const d = new Date(today);
+            d.setDate(d.getDate() + i);
+            const label = i === 0 ? "Today" : d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" });
+            const col = bars.createDiv({ cls: "nlm-forecast-col", attr: { "aria-label": `${label}: ${n} review${n === 1 ? "" : "s"}` } });
+            col.createDiv({ cls: "nlm-forecast-value", text: n ? String(n) : "" });
+            const bar = col.createDiv({ cls: "nlm-forecast-bar" + (i === 0 ? " is-today" : "") });
+            bar.style.height = `${n ? Math.max(4, (n / max) * 100) : 0}%`;
+            col.createDiv({ cls: "nlm-forecast-label", text: i === 0 ? "T" : String(d.getDate()) });
+        });
+        const week = data.slice(0, 7).reduce((a, b) => a + b, 0);
+        panel.createDiv({ cls: "nlm-muted nlm-small", text: `${week} reviews over the next 7 days` });
+    }
+
+    private renderHeatmap(panel: HTMLElement) {
+        const weeks = 20;
+        const activity = this.plugin.scheduler.activity(weeks * 7);
+        const total = activity.reduce((a, b) => a + b.count, 0);
+        const head = panel.createDiv({ cls: "nlm-panel-head" });
+        head.createDiv({ cls: "nlm-panel-title", text: "Activity" });
+        head.createDiv({ cls: "nlm-muted nlm-small", text: `${total} reviews in the last ${weeks} weeks` });
+
+        // Align columns to weeks: pad the start so the first column begins on the same weekday.
+        const firstDow = new Date(activity[0].day).getDay();
+        const cells: ({ day: number; count: number } | null)[] = [...Array(firstDow).fill(null), ...activity];
+        const max = Math.max(1, ...activity.map(a => a.count));
+        const grid = panel.createDiv({ cls: "nlm-heatmap" });
+        for (const cell of cells) {
+            const c = grid.createDiv({ cls: "nlm-heat-cell" });
+            if (!cell) { c.addClass("is-pad"); continue; }
+            const level = cell.count === 0 ? 0 : Math.min(4, Math.ceil((cell.count / max) * 4));
+            c.addClass(`lvl-${level}`);
+            c.setAttr("aria-label", `${new Date(cell.day).toLocaleDateString()}: ${cell.count} review${cell.count === 1 ? "" : "s"}`);
+        }
+    }
+
+    private renderDeckTable(panel: HTMLElement) {
+        const p = this.plugin;
+        panel.createDiv({ cls: "nlm-panel-title", text: "Decks" });
+        const table = panel.createEl("table", { cls: "nlm-deck-table" });
+        const head = table.createEl("thead").createEl("tr");
+        for (const h of ["", "New", "Learning", "Due", "Total", "Learned", ""]) head.createEl("th", { text: h });
+        const tbody = table.createEl("tbody");
+
         const groups = new Map<string, DeckInfo[]>();
-        for (const d of decks) {
+        for (const d of p.index.list()) {
+            if (d.type === "mindmap") continue;
             if (!groups.has(d.deck)) groups.set(d.deck, []);
             groups.get(d.deck)!.push(d);
         }
 
-        const list = el.createDiv({ cls: "nlm-deck-list" });
-        for (const [deckName, notes] of groups) {
-            const group = list.createDiv({ cls: "nlm-deck-group" });
-            const gh = group.createDiv({ cls: "nlm-deck-group-header" });
-            gh.createSpan({ cls: "nlm-deck-name", text: deckName });
-            const groupItems = notes.flatMap(n => this.plugin.filterStudyable(n.items));
-            const ga = this.plugin.countAvailable(groupItems);
-            if (groupItems.length) {
-                counts(gh, ga.fresh, ga.due);
-                gh.createEl("button", { text: "Study deck" }).onclick = () => this.startSession({ deck: deckName });
-            }
-
-            for (const note of notes) {
-                const row = group.createDiv({ cls: "nlm-deck-row" });
-                setIcon(row.createSpan({ cls: "nlm-row-icon" }), iconFor(note.type));
-                const link = row.createEl("a", { cls: "nlm-row-title", text: note.title });
-                link.onclick = () => this.app.workspace.openLinkText(note.path, "", false);
-
-                if (note.type === "mindmap") {
-                    row.createSpan({ cls: "nlm-row-meta", text: "mind map" });
-                    continue;
-                }
-                const items = this.plugin.filterStudyable(note.items);
-                row.createSpan({ cls: "nlm-row-meta", text: `${note.items.length} ${note.type === "quiz" ? "questions" : "cards"}` });
-                if (!items.length) continue;
-                const a = this.plugin.countAvailable(items);
-                counts(row, a.fresh, a.due);
-                const b = row.createEl("button", { attr: { "aria-label": "Study this note" } });
+        const row = (name: string, items: StudyItem[], cls: string, onStudy: () => void, onOpen?: () => void) => {
+            const c = p.stateCounts(items.map(i => i.id));
+            const tr = tbody.createEl("tr", { cls });
+            const nameCell = tr.createEl("td", { cls: "nlm-td-name" });
+            if (onOpen) {
+                const a = nameCell.createEl("a", { text: name });
+                a.onclick = onOpen;
+            } else nameCell.setText(name);
+            tr.createEl("td", { cls: "nlm-td-new", text: String(c.fresh) });
+            tr.createEl("td", { cls: "nlm-td-learning", text: String(c.learning) });
+            tr.createEl("td", { cls: "nlm-td-due", text: String(c.due) });
+            tr.createEl("td", { text: String(items.length) });
+            const pct = items.length ? Math.round((c.review / items.length) * 100) : 0;
+            const learned = tr.createEl("td", { cls: "nlm-td-progress" });
+            const bar = learned.createDiv({ cls: "nlm-mini-progress" });
+            bar.createDiv({ cls: "nlm-mini-progress-bar" }).style.width = `${pct}%`;
+            learned.createSpan({ cls: "nlm-small", text: `${pct}%` });
+            const act = tr.createEl("td");
+            if (items.length) {
+                const b = act.createEl("button", { cls: "clickable-icon", attr: { "aria-label": `Study ${name}` } });
                 setIcon(b, "play");
-                b.onclick = () => this.startSession({ path: note.path });
+                b.onclick = onStudy;
+            }
+        };
+
+        for (const [name, notes] of groups) {
+            const items = notes.flatMap(n => p.filterStudyable(n.items));
+            row(name, items, "nlm-tr-deck", () => this.startSession({ deck: name }));
+            if (notes.length > 1 || notes[0].title !== name) {
+                for (const n of notes) {
+                    row(n.title, p.filterStudyable(n.items), "nlm-tr-note", () => this.startSession({ path: n.path }),
+                        () => void this.app.workspace.openLinkText(n.path, "", false));
+                }
             }
         }
     }
 
-    private renderForecast(el: HTMLElement, ids: string[]) {
-        const days = 14;
-        const data = this.plugin.scheduler.forecast(ids, days);
-        if (!data.some(n => n > 0)) return;
-        const max = Math.max(...data);
-        const wrap = el.createDiv({ cls: "nlm-forecast" });
-        wrap.createDiv({ cls: "nlm-forecast-title", text: "Upcoming reviews (14 days)" });
-        const bars = wrap.createDiv({ cls: "nlm-forecast-bars" });
-        data.forEach((n, i) => {
-            const col = bars.createDiv({ cls: "nlm-forecast-col", attr: { "aria-label": `${i === 0 ? "Today" : `In ${i}d`}: ${n}` } });
-            col.createDiv({ cls: "nlm-forecast-value", text: n ? String(n) : "" });
-            const bar = col.createDiv({ cls: "nlm-forecast-bar" });
-            bar.style.height = `${max ? Math.max(n ? 4 : 0, (n / max) * 100) : 0}%`;
-            col.createDiv({ cls: "nlm-forecast-label", text: i === 0 ? "T" : String(i) });
-        });
-    }
-
-    // --- Session ------------------------------------------------------------
+    // --- Review session -------------------------------------------------------
 
     startSession(filter: StudyFilter) {
+        this.quiz = null;
         const items = this.plugin.studyableItems(filter);
         const sched = this.plugin.scheduler;
         const now = Date.now();
@@ -200,7 +314,7 @@ export class StudyView extends ItemView {
         const newCap = Math.max(0, s.newPerDay - stats.newToday);
         let queue = interleave(reviews.slice(0, reviewCap), fresh.slice(0, newCap));
 
-        // Nothing scheduled: let the user study ahead with the earliest upcoming cards.
+        // Nothing scheduled: study ahead with the earliest upcoming cards.
         if (!queue.length && !learning.length) {
             queue = items
                 .filter(i => sched.has(i.id))
@@ -209,7 +323,13 @@ export class StudyView extends ItemView {
             if (!queue.length) queue = fresh.slice(0, 20);
         }
 
-        this.session = { filter, queue, learning, current: null, revealed: false, quizCorrect: null, history: [], done: 0 };
+        const title = filter.path
+            ? this.plugin.index.decks.get(filter.path)?.title ?? "Note"
+            : filter.deck ?? "All decks";
+        this.session = {
+            filter, title, total: queue.length + learning.length,
+            queue, learning, current: null, revealed: false, quizCorrect: null, history: [], done: 0, again: 0,
+        };
         this.next();
     }
 
@@ -230,89 +350,126 @@ export class StudyView extends ItemView {
         void this.renderSession();
     }
 
+    private sessionTop(page: HTMLElement, title: string, done: number, total: number, onBack: () => void): HTMLElement {
+        const top = page.createDiv({ cls: "nlm-session-top" });
+        const back = top.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Back to dashboard" } });
+        setIcon(back, "arrow-left");
+        back.onclick = onBack;
+        const mid = top.createDiv({ cls: "nlm-session-mid" });
+        mid.createDiv({ cls: "nlm-session-title", text: title });
+        const progress = mid.createDiv({ cls: "nlm-progress" });
+        progress.createDiv({ cls: "nlm-progress-bar" }).style.width = `${total ? Math.min(100, (done / total) * 100) : 0}%`;
+        return top;
+    }
+
     private async renderSession() {
         const s = this.session!;
-        this.cardComponent?.unload();
-        this.cardComponent = new Component();
-        this.cardComponent.load();
-        const comp = this.cardComponent;
-
+        const comp = this.freshComponent();
         const el = this.contentEl;
         el.empty();
-        const top = el.createDiv({ cls: "nlm-session-top" });
-        const back = top.createEl("button", { attr: { "aria-label": "Back to dashboard" } });
-        setIcon(back, "arrow-left");
-        back.onclick = () => this.renderDashboard();
+        const page = el.createDiv({ cls: "nlm-page nlm-session" });
+
         const remaining = s.queue.length + s.learning.length + (s.current ? 1 : 0);
-        top.createSpan({ cls: "nlm-session-count", text: `${s.done} done · ${remaining} left` });
+        const total = Math.max(s.total, s.done + remaining);
+        const top = this.sessionTop(page, s.title, s.done, total, () => this.renderDashboard());
+        const counts = top.createDiv({ cls: "nlm-session-counts" });
+        const left = this.remainingByState();
+        counts.createSpan({ cls: "nlm-count-new", text: String(left.fresh), attr: { "aria-label": "New" } });
+        counts.createSpan({ cls: "nlm-count-learning", text: String(left.learning), attr: { "aria-label": "Learning" } });
+        counts.createSpan({ cls: "nlm-count-due", text: String(left.review), attr: { "aria-label": "Review" } });
         if (s.history.length) {
-            const undo = top.createEl("button", { text: "Undo", attr: { "aria-label": "Undo last answer (U)" } });
+            const undo = top.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Undo (U)" } });
+            setIcon(undo, "undo-2");
             undo.onclick = () => this.undo();
         }
 
         if (!s.current) {
-            const done = el.createDiv({ cls: "nlm-session-done" });
-            setIcon(done.createDiv({ cls: "nlm-done-icon" }), "party-popper");
-            done.createEl("h3", { text: "Session complete" });
-            const later = s.learning.length;
-            done.createEl("p", {
-                text: later
-                    ? `${s.done} reviewed. ${later} learning card${later > 1 ? "s" : ""} will be due again later today.`
-                    : `${s.done} reviewed.`,
-            });
-            done.createEl("button", { cls: "mod-cta", text: "Back to dashboard" }).onclick = () => this.renderDashboard();
             await this.plugin.saveSettings();
+            const done = page.createDiv({ cls: "nlm-session-done" });
+            setIcon(done.createDiv({ cls: "nlm-done-icon" }), "party-popper");
+            done.createEl("h2", { text: "Session complete" });
+            const acc = s.done ? Math.round(((s.done - s.again) / s.done) * 100) : 0;
+            const summary = done.createDiv({ cls: "nlm-done-stats" });
+            doneStat(summary, String(s.done), "reviewed");
+            doneStat(summary, `${acc}%`, "remembered");
+            doneStat(summary, String(s.learning.length), "due again later");
+            const row = done.createDiv({ cls: "nlm-actions" });
+            row.createEl("button", { cls: "mod-cta", text: "Back to dashboard" }).onclick = () => this.renderDashboard();
+            if (s.filter.path) {
+                const path = s.filter.path;
+                row.createEl("button", { text: "Open note" }).onclick = () => void this.app.workspace.openLinkText(path, "", false);
+            }
             return;
         }
 
         const item = s.current;
-        const card = el.createDiv({ cls: "nlm-review-card" });
+        const card = page.createDiv({ cls: "nlm-review-card" + (s.revealed ? " is-revealed" : "") });
         const meta = card.createDiv({ cls: "nlm-review-meta" });
-        meta.createSpan({ text: item.deck });
         const stateLabel = stateName(this.plugin.scheduler.stored(item.id)?.state);
         meta.createSpan({ cls: `nlm-state nlm-state-${stateLabel.toLowerCase()}`, text: stateLabel });
-        const open = meta.createEl("a", { text: "Open note" });
-        open.onclick = () => this.app.workspace.openLinkText(item.path, "", "split");
+        meta.createSpan({ cls: "nlm-review-deck", text: item.deck });
+        const open = meta.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Open in note" } });
+        setIcon(open, "file-symlink");
+        open.onclick = () => void this.openAt(item);
 
         const body = card.createDiv({ cls: "nlm-review-body" });
 
         if (item.kind === "flashcard") {
+            card.addClass("is-flashcard");
             const front = body.createDiv({ cls: "nlm-review-front" });
             await MarkdownRenderer.render(this.app, item.card.front, front, item.path, comp);
             if (s.revealed) {
-                body.createEl("hr");
+                body.createDiv({ cls: "nlm-divider" });
                 const backEl = body.createDiv({ cls: "nlm-review-back" });
                 await MarkdownRenderer.render(this.app, item.card.back, backEl, item.path, comp);
-                this.renderGrades(el, null);
+                this.renderGrades(page, null);
             } else {
-                const btn = el.createEl("button", { cls: "mod-cta nlm-reveal", text: "Show answer" });
+                const btn = page.createEl("button", { cls: "mod-cta nlm-reveal" });
+                btn.createSpan({ text: "Show answer" });
                 btn.createSpan({ cls: "nlm-kbd", text: "Space" });
                 btn.onclick = () => { s.revealed = true; void this.renderSession(); };
             }
         } else {
+            card.addClass("is-quiz");
             const { answerWith } = await renderQuizQuestion(this.plugin, body, item.question, item.path, comp, correct => {
                 s.revealed = true;
                 s.quizCorrect = correct;
-                this.renderGrades(el, correct ? Rating.Good : Rating.Again);
+                card.addClass("is-revealed");
+                this.renderGrades(page, correct ? Rating.Good : Rating.Again);
             });
             s.answerWith = answerWith;
-            if (!s.revealed) el.createDiv({ cls: "nlm-hint-keys", text: "Press A–" + String.fromCharCode(64 + item.question.options.length) + " to answer" });
+            if (!s.revealed) {
+                page.createDiv({ cls: "nlm-hint-keys", text: `Click an answer or press A–${String.fromCharCode(64 + item.question.options.length)}` });
+            }
         }
-        this.contentEl.focus();
+        this.contentEl.focus({ preventScroll: true });
     }
 
-    private renderGrades(el: HTMLElement, suggested: Grade | null) {
+    private remainingByState() {
         const s = this.session!;
-        el.querySelector(".nlm-grades")?.remove();
-        el.querySelector(".nlm-hint-keys")?.remove();
+        const out = { fresh: 0, learning: 0, review: 0 };
+        const all = [...s.queue, ...s.learning.map(l => l.item), ...(s.current ? [s.current] : [])];
+        for (const i of all) {
+            const st = this.plugin.scheduler.stored(i.id)?.state;
+            if (st === undefined || st === State.New) out.fresh++;
+            else if (st === State.Review) out.review++;
+            else out.learning++;
+        }
+        return out;
+    }
+
+    private renderGrades(page: HTMLElement, suggested: Grade | null) {
+        const s = this.session!;
+        page.querySelector(".nlm-grades")?.remove();
+        page.querySelector(".nlm-hint-keys")?.remove();
         const now = Date.now();
         const preview = this.plugin.scheduler.preview(s.current!.id, now);
-        const row = el.createDiv({ cls: "nlm-grades" });
+        const row = page.createDiv({ cls: "nlm-grades" });
         GRADES.forEach((g, i) => {
             const b = row.createEl("button", { cls: `nlm-grade nlm-grade-${GRADE_LABEL[g].toLowerCase()}` });
             if (g === suggested) b.addClass("is-suggested");
-            b.createDiv({ cls: "nlm-grade-label", text: GRADE_LABEL[g] });
             b.createDiv({ cls: "nlm-grade-ivl", text: formatInterval(now, preview[g].getTime()) });
+            b.createDiv({ cls: "nlm-grade-label", text: GRADE_LABEL[g] });
             b.createSpan({ cls: "nlm-kbd", text: String(i + 1) });
             b.onclick = () => this.grade(g);
         });
@@ -325,6 +482,7 @@ export class StudyView extends ItemView {
         const token = this.plugin.scheduler.review(item.id, g);
         s.history.push({ item, token });
         s.done++;
+        if (g === Rating.Again) s.again++;
 
         const st = this.plugin.scheduler.stored(item.id)!;
         if (st.state !== State.Review && st.due < this.plugin.scheduler.dayEnd()) {
@@ -339,23 +497,125 @@ export class StudyView extends ItemView {
         const s = this.session;
         const last = s?.history.pop();
         if (!s || !last) return;
+        const lastRating = this.plugin.scheduler.data.log[last.token.logLength]?.rating;
         this.plugin.scheduler.undo(last.token);
         s.learning = s.learning.filter(l => l.item.id !== last.item.id);
         if (s.current) s.queue.unshift(s.current);
         s.done = Math.max(0, s.done - 1);
+        if (lastRating === Rating.Again) s.again = Math.max(0, s.again - 1);
         s.current = last.item;
         s.revealed = false;
         s.quizCorrect = null;
         this.plugin.requestSave();
+        this.plugin.index.trigger("reviewed");
         void this.renderSession();
     }
 
+    /** Open the note in a split, scrolled to the card. */
+    private async openAt(item: StudyItem) {
+        const file = this.app.vault.getAbstractFileByPath(item.path);
+        if (!(file instanceof TFile)) return;
+        const leaf = this.app.workspace.getLeaf("split");
+        await leaf.openFile(file, item.line !== undefined ? { eState: { line: item.line } } : undefined);
+    }
+
+    // --- Quiz practice ----------------------------------------------------------
+
+    startQuiz(path: string, order?: number[]) {
+        this.session = null;
+        const deck = this.plugin.index.decks.get(path);
+        const questions = (deck?.items ?? []).flatMap(i => (i.kind === "quiz" ? [i.question] : []));
+        this.quiz = {
+            path,
+            title: deck?.title ?? "Quiz",
+            questions,
+            order: order ?? questions.map((_, i) => i),
+            pos: 0,
+            correct: 0,
+            missed: [],
+            answered: false,
+        };
+        void this.renderQuiz();
+    }
+
+    private async renderQuiz() {
+        const q = this.quiz!;
+        const comp = this.freshComponent();
+        const el = this.contentEl;
+        el.empty();
+        const page = el.createDiv({ cls: "nlm-page nlm-session" });
+        const top = this.sessionTop(page, `Quiz · ${q.title}`, q.pos, q.order.length, () => this.renderDashboard());
+        top.createDiv({ cls: "nlm-session-score", text: `${q.correct} / ${q.pos}` });
+
+        if (!q.questions.length) {
+            page.createDiv({ cls: "nlm-empty", text: "This note has no quiz questions." });
+            return;
+        }
+
+        if (q.pos >= q.order.length) {
+            const total = q.order.length;
+            const pct = Math.round((q.correct / total) * 100);
+            const done = page.createDiv({ cls: "nlm-session-done" });
+            const ring = done.createDiv({ cls: "nlm-score-ring" });
+            ring.style.setProperty("--pct", String(pct));
+            ring.createSpan({ text: `${pct}%` });
+            done.createEl("h2", { text: pct >= 90 ? "Excellent!" : pct >= 70 ? "Well done" : pct >= 50 ? "Getting there" : "Keep practicing" });
+            done.createDiv({ cls: "nlm-muted", text: `${q.correct} of ${total} correct` });
+            const row = done.createDiv({ cls: "nlm-actions" });
+            if (q.missed.length) {
+                const missed = [...q.missed];
+                row.createEl("button", { cls: "mod-cta", text: `Retry ${missed.length} missed` }).onclick = () => this.startQuiz(q.path, missed);
+            }
+            row.createEl("button", { text: "Restart" }).onclick = () => this.startQuiz(q.path);
+            row.createEl("button", { text: "Shuffle" }).onclick = () => this.startQuiz(q.path, shuffle(q.questions.map((_, i) => i)));
+            row.createEl("button", { text: "Back to note" }).onclick = () => void this.app.workspace.openLinkText(q.path, "", false);
+            return;
+        }
+
+        const index = q.order[q.pos];
+        const card = page.createDiv({ cls: "nlm-review-card is-quiz" });
+        const meta = card.createDiv({ cls: "nlm-review-meta" });
+        meta.createSpan({ cls: "nlm-state", text: `Question ${q.pos + 1} of ${q.order.length}` });
+        const body = card.createDiv({ cls: "nlm-review-body" });
+        q.answered = false;
+        const { answerWith } = await renderQuizQuestion(this.plugin, body, q.questions[index], q.path, comp, correct => {
+            q.answered = true;
+            if (correct) q.correct++;
+            else q.missed.push(index);
+            card.addClass(correct ? "is-correct" : "is-wrong");
+            const next = page.createEl("button", { cls: "mod-cta nlm-reveal" });
+            next.createSpan({ text: q.pos + 1 < q.order.length ? "Next question" : "See results" });
+            next.createSpan({ cls: "nlm-kbd", text: "Enter" });
+            next.onclick = () => this.nextQuestion();
+            top.querySelector(".nlm-session-score")?.setText(`${q.correct} / ${q.pos + 1}`);
+        });
+        q.answerWith = answerWith;
+        this.contentEl.focus({ preventScroll: true });
+    }
+
+    private nextQuestion() {
+        const q = this.quiz;
+        if (!q?.answered) return;
+        q.pos++;
+        void this.renderQuiz();
+    }
+
+    // --- Keyboard -------------------------------------------------------------
+
     private onKey(e: KeyboardEvent) {
-        const s = this.session;
-        if (!s?.current || e.ctrlKey || e.metaKey || e.altKey) return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
         if ((e.target as HTMLElement).closest("input, textarea")) return;
         const key = e.key.toLowerCase();
 
+        if (this.quiz) {
+            const q = this.quiz;
+            if (!q.answered && /^[a-h]$/.test(key)) { e.preventDefault(); q.answerWith?.(key.charCodeAt(0) - 97); }
+            else if (q.answered && (key === "enter" || key === " ")) { e.preventDefault(); this.nextQuestion(); }
+            return;
+        }
+
+        const s = this.session;
+        if (!s?.current) return;
         if (key === "u") { e.preventDefault(); this.undo(); return; }
 
         if (!s.revealed) {
@@ -380,20 +640,26 @@ export class StudyView extends ItemView {
     }
 }
 
-function tile(parent: HTMLElement, label: string, value: string) {
+function iconButton(parent: HTMLElement, icon: string, label: string, onClick: () => void) {
+    const b = parent.createEl("button");
+    setIcon(b.createSpan({ cls: "nlm-btn-icon" }), icon);
+    b.createSpan({ text: label });
+    b.onclick = onClick;
+}
+
+function tile(parent: HTMLElement, icon: string, value: string, label: string, sub: string) {
     const t = parent.createDiv({ cls: "nlm-tile" });
-    t.createDiv({ cls: "nlm-tile-value", text: value });
-    t.createDiv({ cls: "nlm-tile-label", text: label });
+    setIcon(t.createDiv({ cls: "nlm-tile-icon" }), icon);
+    const text = t.createDiv();
+    text.createDiv({ cls: "nlm-tile-value", text: value });
+    text.createDiv({ cls: "nlm-tile-label", text: label });
+    if (sub) text.createDiv({ cls: "nlm-tile-sub", text: sub });
 }
 
-function counts(parent: HTMLElement, fresh: number, due: number) {
-    const c = parent.createDiv({ cls: "nlm-counts" });
-    c.createSpan({ cls: "nlm-count-new", text: String(fresh), attr: { "aria-label": "New" } });
-    c.createSpan({ cls: "nlm-count-due", text: String(due), attr: { "aria-label": "Due" } });
-}
-
-function iconFor(type: string): string {
-    return type === "quiz" ? "list-checks" : type === "mindmap" ? "network" : "layers";
+function doneStat(parent: HTMLElement, value: string, label: string) {
+    const d = parent.createDiv({ cls: "nlm-done-stat" });
+    d.createDiv({ cls: "nlm-done-value", text: value });
+    d.createDiv({ cls: "nlm-muted", text: label });
 }
 
 function stateName(state: State | undefined): string {
@@ -418,4 +684,12 @@ function interleave(reviews: StudyItem[], fresh: StudyItem[]): StudyItem[] {
     });
     while (f < fresh.length) out.push(fresh[f++]);
     return out;
+}
+
+function shuffle<T>(arr: T[]): T[] {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
 }

@@ -182,6 +182,27 @@ export class Scheduler {
         };
     }
 
+    /** Reviews per study day for the last `days` days, oldest first. */
+    activity(days: number, now = Date.now()): { day: number; count: number }[] {
+        const today = this.dayStart(now);
+        const first = today - (days - 1) * DAY;
+        const counts = new Map<number, number>();
+        for (const e of this.data.log) {
+            if (e.t < first) continue;
+            const d = this.dayStart(e.t);
+            counts.set(d, (counts.get(d) ?? 0) + 1);
+        }
+        const out: { day: number; count: number }[] = [];
+        for (let i = 0; i < days; i++) {
+            // Step by calendar day so DST changes don't drift the keys.
+            const d = new Date(first);
+            d.setDate(d.getDate() + i);
+            const key = this.dayStart(d.getTime() + 60 * 60 * 1000);
+            out.push({ day: key, count: counts.get(key) ?? 0 });
+        }
+        return out;
+    }
+
     /** Number of the given cards due on each of the next `days` study days (index 0 = today, incl. overdue). */
     forecast(ids: string[], days: number, now = Date.now()): number[] {
         const counts = new Array(days).fill(0);

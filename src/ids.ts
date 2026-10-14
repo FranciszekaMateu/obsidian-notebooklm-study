@@ -1,3 +1,5 @@
+import { Flashcard, QuizQuestion } from "./types";
+
 /**
  * Stable short ids derived from content (FNV-1a, 2x32 bits). Re-importing an
  * unchanged card yields the same id, so its review history survives a re-sync.
@@ -32,4 +34,12 @@ export function slugify(s: string): string {
 /** Strip characters that are invalid in vault file names. */
 export function safeFileName(s: string): string {
     return s.replace(/[\\/:*?"<>|#^[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 120) || "Untitled";
+}
+
+export function flashcardId(c: Flashcard): string {
+    return contentId("fc", c.front);
+}
+
+export function quizId(q: QuizQuestion): string {
+    return contentId("qz", q.question);
 }

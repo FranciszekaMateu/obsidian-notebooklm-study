@@ -1,9 +1,11 @@
 import { App, TFile, TFolder, normalizePath } from "obsidian";
 import { safeFileName } from "./ids";
+import { region, replaceRegion, serializeCallouts } from "./callouts";
 import {
     BLOCK_LANG, NoteOptions, buildFlashcardsNote, buildMindMapNote, buildQuizNote, carryOverIds,
-    findBlock, parseFlashcards, parseQuiz, replaceBlock, serializeFlashcards, serializeQuiz,
+    findBlock, replaceBlock, touchSynced,
 } from "./notes";
+import { convertLegacyContent, parseStudyContent } from "./study-content";
 import { toOutline, toCanvas } from "./mindmap";
 import type { DeckIndex } from "./srs/deck-index";
 import type { NotebookLMStudySettings } from "./settings";
@@ -81,27 +83,35 @@ export class NoteWriter {
 
     private async update(file: TFile, req: WriteRequest) {
         const { content } = req;
-        await this.app.vault.process(file, data => {
-            let body: string;
-            if (content.type === "flashcards") {
-                const old = findBlock(data, BLOCK_LANG.flashcards);
-                const cards = old ? carryOverIds(content.cards, parseFlashcards(old.body), c => c.front) : content.cards;
-                body = serializeFlashcards(cards);
-            } else if (content.type === "quiz") {
-                const old = findBlock(data, BLOCK_LANG.quiz);
-                const qs = old ? carryOverIds(content.questions, parseQuiz(old.body), q => q.question) : content.questions;
-                body = serializeQuiz(qs);
-            } else {
-                body = toOutline(content.root);
+        if (content.type === "mindmap") {
+            const body = toOutline(content.root);
+            await this.app.vault.process(file, data =>
+                replaceBlock(data, "mindmap", body) ?? `${data.trimEnd()}\n\n\`\`\`${BLOCK_LANG.mindmap}\n${body}\n\`\`\`\n`
+            );
+            if (this.settings.mindmapCanvas) {
+                await this.writeCanvas(file.path.replace(/\.md$/, ".canvas"), toCanvas(content.root));
             }
-            const replaced = replaceBlock(data, content.type, body);
-            // The user deleted the managed block: put a fresh one at the end rather than lose the sync.
-            return replaced ?? `${data.trimEnd()}\n\n\`\`\`${BLOCK_LANG[content.type]}\n${body}\n\`\`\`\n`;
-        });
-
-        if (content.type === "mindmap" && this.settings.mindmapCanvas) {
-            await this.writeCanvas(file.path.replace(/\.md$/, ".canvas"), toCanvas(content.root));
+            return;
         }
+
+        await this.app.vault.process(file, data => {
+            const old = parseStudyContent(data);
+            const body = content.type === "flashcards"
+                ? serializeCallouts({ cards: carryOverIds(content.cards, old.cards, c => c.front) })
+                : serializeCallouts({ questions: carryOverIds(content.questions, old.questions, q => q.question) });
+            return touchSynced(replaceManaged(data, body));
+        });
+    }
+
+    /** Rewrite a note that still uses the 2.0.0 code-block format as callouts. Returns false if there was nothing to convert. */
+    async convertLegacy(file: TFile): Promise<boolean> {
+        let changed = false;
+        await this.app.vault.process(file, data => {
+            const converted = convertLegacyContent(data);
+            changed = converted !== null;
+            return converted ?? data;
+        });
+        return changed;
     }
 
     folderFor(origin: NoteOrigin): string {
@@ -134,3 +144,15 @@ export class NoteWriter {
         return path;
     }
 }
+
+/** Swap the synced region (or a 2.0.0 code block) for new callouts; append a region if there is neither. */
+function replaceManaged(data: string, body: string): string {
+    const replaced = replaceRegion(data, body);
+    if (replaced !== null) return replaced;
+    for (const lang of [BLOCK_LANG.flashcards, BLOCK_LANG.quiz]) {
+        const block = findBlock(data, lang);
+        if (block) return data.slice(0, block.start) + region(body) + data.slice(block.end);
+    }
+    return `${data.trimEnd()}\n\n${region(body)}\n`;
+}
+

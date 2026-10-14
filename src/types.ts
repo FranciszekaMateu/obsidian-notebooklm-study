@@ -39,5 +39,5 @@ export interface NoteOrigin {
 
 /** A reviewable item found in the vault. Quiz questions are reviewable too. */
 export type StudyItem =
-    | { kind: "flashcard"; id: string; path: string; deck: string; card: Flashcard }
-    | { kind: "quiz"; id: string; path: string; deck: string; question: QuizQuestion };
+    | { kind: "flashcard"; id: string; path: string; deck: string; line?: number; card: Flashcard }
+    | { kind: "quiz"; id: string; path: string; deck: string; line?: number; question: QuizQuestion };

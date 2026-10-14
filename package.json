@@ -1,6 +1,6 @@
 {
     "name": "obsidian-notebooklm-study",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "description": "Study NotebookLM flashcards, quizzes and mind maps in Obsidian with FSRS spaced repetition.",
     "main": "main.js",
     "scripts": {

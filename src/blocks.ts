@@ -1,16 +1,20 @@
 import { Component, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, TFile, setIcon } from "obsidian";
+import { QUIZ_CALLOUT } from "./callouts";
 import type NotebookLMStudy from "./main";
 import { countNodes, parseOutline } from "./mindmap";
-import { parseFlashcards, parseQuiz } from "./notes";
 import { MindMapNode, QuizQuestion } from "./types";
 
 export function registerBlocks(plugin: NotebookLMStudy) {
-    plugin.registerMarkdownCodeBlockProcessor("nlm-flashcards", (src, el, ctx) => {
-        ctx.addChild(new FlashcardsBlock(plugin, el, src, ctx));
+    plugin.registerMarkdownPostProcessor(el => {
+        el.querySelectorAll<HTMLElement>(`.callout[data-callout="${QUIZ_CALLOUT}"]`).forEach(enhanceQuizCallout);
     });
-    plugin.registerMarkdownCodeBlockProcessor("nlm-quiz", (src, el, ctx) => {
-        ctx.addChild(new QuizBlock(plugin, el, src, ctx));
-    });
+
+    // Notes written by 2.0.0 keep their code blocks until converted.
+    for (const lang of ["nlm-flashcards", "nlm-quiz"]) {
+        plugin.registerMarkdownCodeBlockProcessor(lang, (_src, el, ctx) => {
+            ctx.addChild(new LegacyBlock(plugin, el, ctx));
+        });
+    }
     plugin.registerMarkdownCodeBlockProcessor("nlm-mindmap", (src, el, ctx) => {
         ctx.addChild(new MindMapBlock(plugin, el, src, ctx));
     });
@@ -21,184 +25,92 @@ async function renderMd(plugin: NotebookLMStudy, md: string, el: HTMLElement, so
     await MarkdownRenderer.render(plugin.app, md, el, sourcePath, owner);
 }
 
-// --- Flashcards -------------------------------------------------------------
-
-class FlashcardsBlock extends MarkdownRenderChild {
-    private index = 0;
-    private flipped = false;
-
-    constructor(private plugin: NotebookLMStudy, el: HTMLElement, private src: string, private ctx: MarkdownPostProcessorContext) {
-        super(el);
-    }
-
-    onload() {
-        this.render();
-        // Refresh due counts after reviews.
-        this.registerEvent(this.plugin.index.on("changed", () => this.renderHeader()));
-        this.registerEvent(this.plugin.index.on("reviewed", () => this.renderHeader()));
-    }
-
-    private header!: HTMLElement;
-
-    private render() {
-        const cards = parseFlashcards(this.src);
-        const root = this.containerEl.createDiv({ cls: "nlm-block nlm-deck" });
-        this.header = root.createDiv({ cls: "nlm-block-header" });
-        this.renderHeader();
-
-        if (!cards.length) {
-            root.createDiv({ cls: "nlm-empty", text: "No cards. Add them as Q: / A: lines." });
-            return;
-        }
-
-        const card = root.createDiv({ cls: "nlm-flipcard", attr: { tabindex: "0", "aria-label": "Flip card" } });
-        const face = card.createDiv({ cls: "nlm-flipcard-face" });
-        const side = card.createDiv({ cls: "nlm-flipcard-side" });
-
-        const nav = root.createDiv({ cls: "nlm-nav" });
-        const prev = nav.createEl("button", { attr: { "aria-label": "Previous card" } });
-        setIcon(prev, "chevron-left");
-        const counter = nav.createSpan({ cls: "nlm-counter" });
-        const next = nav.createEl("button", { attr: { "aria-label": "Next card" } });
-        setIcon(next, "chevron-right");
-
-        const show = async () => {
-            const c = cards[this.index];
-            side.setText(this.flipped ? "Answer" : "Question");
-            card.toggleClass("is-flipped", this.flipped);
-            counter.setText(`${this.index + 1} / ${cards.length}`);
-            await renderMd(this.plugin, this.flipped ? c.back : c.front, face, this.ctx.sourcePath, this);
-        };
-        const go = (delta: number) => {
-            this.index = (this.index + delta + cards.length) % cards.length;
-            this.flipped = false;
-            void show();
-        };
-
-        card.onclick = (e) => {
-            if ((e.target as HTMLElement).closest("a")) return;
-            this.flipped = !this.flipped;
-            void show();
-        };
-        card.onkeydown = (e) => {
-            if (e.key === " " || e.key === "Enter") { e.preventDefault(); card.click(); }
-            if (e.key === "ArrowRight") go(1);
-            if (e.key === "ArrowLeft") go(-1);
-        };
-        prev.onclick = () => go(-1);
-        next.onclick = () => go(1);
-        void show();
-    }
-
-    private renderHeader() {
-        if (!this.header) return;
-        const h = this.header;
-        h.empty();
-        const deck = this.plugin.index.decks.get(this.ctx.sourcePath);
-        const ids = deck?.items.map(i => i.id) ?? parseFlashcards(this.src).map(c => c.id as string);
-        const { fresh, due } = this.plugin.countDue(ids);
-
-        const title = h.createDiv({ cls: "nlm-block-title" });
-        setIcon(title.createSpan(), "layers");
-        title.createSpan({ text: `${ids.length} flashcards` });
-
-        const counts = h.createDiv({ cls: "nlm-counts" });
-        counts.createSpan({ cls: "nlm-count-new", text: `${fresh} new` });
-        counts.createSpan({ cls: "nlm-count-due", text: `${due} due` });
-
-        const btn = h.createEl("button", { cls: "mod-cta", text: "Study" });
-        btn.onclick = () => this.plugin.openStudy({ path: this.ctx.sourcePath });
-    }
+/** Stop a click from reaching the editor (Live Preview would otherwise jump into the callout's source). */
+function swallow(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
 }
 
-// --- Quiz -------------------------------------------------------------------
+// --- Quiz callouts ----------------------------------------------------------
 
-class QuizBlock extends MarkdownRenderChild {
-    private questions: QuizQuestion[] = [];
-    private order: number[] = [];
-    private pos = 0;
-    private correct = 0;
-    private missed: number[] = [];
+/**
+ * Turns the task list inside a `> [!quiz]` callout into clickable answers.
+ * The note itself is never modified: correctness is read from the rendered
+ * checkboxes once, then the checkboxes are hidden.
+ */
+function enhanceQuizCallout(callout: HTMLElement) {
+    if (callout.dataset.nlmQuiz) return;
+    const content = callout.querySelector<HTMLElement>(".callout-content");
+    const list = content?.querySelector<HTMLElement>("ul.contains-task-list, ul:has(> li.task-list-item)");
+    if (!content || !list) return;
+    const options = Array.from(list.children).filter((li): li is HTMLElement => li instanceof HTMLElement && li.matches("li.task-list-item"));
+    if (!options.length) return;
+    callout.dataset.nlmQuiz = "1";
+    callout.addClass("nlm-quiz-callout");
 
-    constructor(private plugin: NotebookLMStudy, el: HTMLElement, private src: string, private ctx: MarkdownPostProcessorContext) {
-        super(el);
+    const correct = options.map(li => li.dataset.task === "x" || li.dataset.task === "X" || li.hasClass("is-checked"));
+    options.forEach((li, i) => {
+        li.removeClass("is-checked");
+        li.removeAttribute("data-task");
+        li.addClass("nlm-q-option");
+        li.querySelector("input.task-list-item-checkbox")?.remove();
+        li.prepend(createSpan({ cls: "nlm-option-key", text: String.fromCharCode(65 + i) }));
+    });
+
+    // Hide a "Hint:" paragraph behind a button.
+    const hintP = Array.from(content.querySelectorAll("p")).find(p => /^\s*(hint|pista)\s*:/i.test(p.textContent ?? ""));
+    let hintBtn: HTMLButtonElement | null = null;
+    if (hintP) {
+        hintP.addClass("nlm-hint", "is-hidden");
+        hintBtn = createEl("button", { cls: "nlm-chip-btn", text: "Show hint" });
+        hintP.before(hintBtn);
+        hintBtn.addEventListener("mousedown", swallow, true);
+        hintBtn.addEventListener("click", e => {
+            swallow(e);
+            hintP.removeClass("is-hidden");
+            hintBtn?.remove();
+        }, true);
     }
 
-    onload() {
-        this.questions = parseQuiz(this.src);
-        this.start(this.questions.map((_, i) => i));
-    }
+    const footer = content.createDiv({ cls: "nlm-q-footer" });
+    const result = footer.createSpan({ cls: "nlm-q-result" });
+    const reset = footer.createEl("button", { cls: "nlm-chip-btn", text: "Try again" });
+    reset.hide();
 
-    private start(order: number[]) {
-        this.order = order;
-        this.pos = 0;
-        this.correct = 0;
-        this.missed = [];
-        void this.renderQuestion();
-    }
-
-    private shell(): HTMLElement {
-        this.containerEl.empty();
-        const root = this.containerEl.createDiv({ cls: "nlm-block nlm-quiz" });
-        const header = root.createDiv({ cls: "nlm-block-header" });
-        const title = header.createDiv({ cls: "nlm-block-title" });
-        setIcon(title.createSpan(), "list-checks");
-        title.createSpan({ text: `Quiz · ${this.questions.length} questions` });
-        if (this.plugin.settings.includeQuizInReview) {
-            const btn = header.createEl("button", { text: "Review with SRS" });
-            btn.onclick = () => this.plugin.openStudy({ path: this.ctx.sourcePath });
-        }
-        return root;
-    }
-
-    private async renderQuestion() {
-        const root = this.shell();
-        if (!this.questions.length) {
-            root.createDiv({ cls: "nlm-empty", text: "No questions. Add them as Q: lines with - [x] / - [ ] options." });
-            return;
-        }
-        if (this.pos >= this.order.length) {
-            this.renderResult(root);
-            return;
-        }
-
-        const q = this.questions[this.order[this.pos]];
-        const progress = root.createDiv({ cls: "nlm-progress" });
-        progress.createDiv({ cls: "nlm-progress-bar" }).style.width = `${(this.pos / this.order.length) * 100}%`;
-        root.createDiv({ cls: "nlm-quiz-meta", text: `Question ${this.pos + 1} of ${this.order.length} · ${this.correct} correct` });
-
-        await renderQuizQuestion(this.plugin, root, q, this.ctx.sourcePath, this, (wasCorrect) => {
-            if (wasCorrect) this.correct++;
-            else this.missed.push(this.order[this.pos]);
-            const next = root.createEl("button", {
-                cls: "mod-cta nlm-next",
-                text: this.pos + 1 < this.order.length ? "Next question" : "See results",
-            });
-            next.onclick = () => { this.pos++; void this.renderQuestion(); };
-            next.focus();
+    const answer = (index: number) => {
+        if (callout.hasClass("is-answered")) return;
+        callout.addClass("is-answered");
+        options.forEach((li, i) => {
+            li.addClass(correct[i] ? "is-correct" : i === index ? "is-wrong" : "is-dim");
         });
-    }
+        const ok = correct[index];
+        result.setText(ok ? "Correct" : "Not quite");
+        result.toggleClass("is-ok", ok);
+        result.toggleClass("is-bad", !ok);
+        reset.show();
+    };
 
-    private renderResult(root: HTMLElement) {
-        const total = this.order.length;
-        const pct = Math.round((this.correct / total) * 100);
-        const result = root.createDiv({ cls: "nlm-quiz-result" });
-        result.createDiv({ cls: "nlm-quiz-score", text: `${pct}%` });
-        result.createDiv({ text: `${this.correct} of ${total} correct` });
-
-        const actions = result.createDiv({ cls: "nlm-actions" });
-        actions.createEl("button", { text: "Restart" }).onclick = () => this.start(this.questions.map((_, i) => i));
-        actions.createEl("button", { text: "Shuffle" }).onclick = () => this.start(shuffle(this.questions.map((_, i) => i)));
-        if (this.missed.length) {
-            actions.createEl("button", { cls: "mod-cta", text: `Retry ${this.missed.length} missed` })
-                .onclick = () => this.start([...this.missed]);
-        }
-    }
+    options.forEach((li, i) => {
+        li.addEventListener("mousedown", swallow, true);
+        li.addEventListener("click", e => {
+            if ((e.target as HTMLElement).closest("a")) return;
+            swallow(e);
+            answer(i);
+        }, true);
+    });
+    reset.addEventListener("mousedown", swallow, true);
+    reset.addEventListener("click", e => {
+        swallow(e);
+        callout.removeClass("is-answered");
+        options.forEach(li => li.removeClass("is-correct", "is-wrong", "is-dim"));
+        result.setText("");
+        reset.hide();
+    }, true);
 }
 
 /**
- * Shared by the quiz block and the review session: renders a question with
- * clickable options and reveals correctness + rationales on answer.
+ * Quiz question with clickable options, used by the study view for both the
+ * SRS session and quiz practice.
  */
 export async function renderQuizQuestion(
     plugin: NotebookLMStudy,
@@ -243,7 +155,7 @@ export async function renderQuizQuestion(
 
     if (q.hint) {
         const hint = q.hint;
-        hintBtn = parent.createEl("button", { cls: "nlm-hint-btn", text: "Show hint" });
+        hintBtn = parent.createEl("button", { cls: "nlm-chip-btn", text: "Show hint" });
         hintBtn.onclick = () => {
             hintBtn?.replaceWith(createDiv({ cls: "nlm-hint", text: hint }));
             hintBtn = null;
@@ -253,12 +165,23 @@ export async function renderQuizQuestion(
     return { answerWith };
 }
 
-function shuffle<T>(arr: T[]): T[] {
-    for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
+// --- Legacy code blocks -----------------------------------------------------
+
+class LegacyBlock extends MarkdownRenderChild {
+    constructor(private plugin: NotebookLMStudy, el: HTMLElement, private ctx: MarkdownPostProcessorContext) {
+        super(el);
     }
-    return arr;
+
+    onload() {
+        const bar = this.containerEl.createDiv({ cls: "nlm-legacy" });
+        setIcon(bar.createSpan(), "info");
+        bar.createSpan({ text: "These cards use the old code-block format." });
+        const btn = bar.createEl("button", { cls: "mod-cta", text: "Convert to callouts" });
+        btn.onclick = async () => {
+            const file = this.plugin.app.vault.getAbstractFileByPath(this.ctx.sourcePath);
+            if (file instanceof TFile) await this.plugin.writer.convertLegacy(file);
+        };
+    }
 }
 
 // --- Mind map ---------------------------------------------------------------

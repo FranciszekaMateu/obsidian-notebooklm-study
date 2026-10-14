@@ -1,4 +1,5 @@
-import { contentId } from "./ids";
+import { flashcardId, quizId } from "./ids";
+import { region, serializeCallouts } from "./callouts";
 import { toOutline } from "./mindmap";
 import { ContentType, Flashcard, MindMapNode, NoteOrigin, QuizQuestion } from "./types";
 
@@ -65,9 +66,6 @@ export function parseFlashcards(source: string): Flashcard[] {
     return cards;
 }
 
-export function flashcardId(c: Flashcard): string {
-    return contentId("fc", c.front);
-}
 
 // --- Quiz block -------------------------------------------------------------
 //
@@ -147,9 +145,6 @@ export function parseQuiz(source: string): QuizQuestion[] {
     return questions;
 }
 
-export function quizId(q: QuizQuestion): string {
-    return contentId("qz", q.question);
-}
 
 function oneLine(s: string): string {
     return s.replace(/\s*\n\s*/g, " ").trim();
@@ -193,25 +188,15 @@ function fence(lang: string, body: string): string {
 }
 
 export function buildFlashcardsNote(cards: Flashcard[], opts: NoteOptions): string {
-    return [
-        frontmatter("flashcards", opts),
-        "",
-        `# ${opts.title}`,
-        "",
-        fence(BLOCK_LANG.flashcards, serializeFlashcards(cards)),
-        "",
-    ].join("\n");
+    return studyNote("flashcards", serializeCallouts({ cards }), opts);
 }
 
 export function buildQuizNote(questions: QuizQuestion[], opts: NoteOptions): string {
-    return [
-        frontmatter("quiz", opts),
-        "",
-        `# ${opts.title}`,
-        "",
-        fence(BLOCK_LANG.quiz, serializeQuiz(questions)),
-        "",
-    ].join("\n");
+    return studyNote("quiz", serializeCallouts({ questions }), opts);
+}
+
+function studyNote(type: ContentType, body: string, opts: NoteOptions): string {
+    return [frontmatter(type, opts), "", `# ${opts.title}`, "", region(body), ""].join("\n");
 }
 
 export function buildMindMapNote(root: MindMapNode, opts: NoteOptions): string {
@@ -236,6 +221,10 @@ export function findBlock(content: string, lang: string): { start: number; end: 
     return { start: m.index, end: m.index + m[0].length, body: m[2] };
 }
 
+export function touchSynced(content: string): string {
+    return content.replace(/^nlm-synced: .*$/m, `nlm-synced: ${new Date().toISOString()}`);
+}
+
 /**
  * Replace the managed block (and refresh nlm-synced) while keeping anything
  * the user wrote around it. Returns null when the note has no such block.
@@ -244,7 +233,7 @@ export function replaceBlock(content: string, type: ContentType, body: string): 
     const block = findBlock(content, BLOCK_LANG[type]);
     if (!block) return null;
     const updated = content.slice(0, block.start) + fence(BLOCK_LANG[type], body) + content.slice(block.end);
-    return updated.replace(/^nlm-synced: .*$/m, `nlm-synced: ${new Date().toISOString()}`);
+    return touchSynced(updated);
 }
 
 /**
