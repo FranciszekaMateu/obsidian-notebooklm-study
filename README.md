@@ -5,8 +5,8 @@ Bring the study material NotebookLM generates — **flashcards, quizzes and mind
 ## Features
 
 **NotebookLM, from inside Obsidian** (desktop, through the [`nlm` CLI](https://github.com/jacob-bd/gemini-notebook-mcp-cli))
-- **Generate**: right-click a note or folder → *Generate with NotebookLM*. The notes are uploaded as sources and NotebookLM creates flashcards, a quiz, a mind map, an audio overview, a study guide or an infographic, which are then imported automatically.
-- **Ask**: chat with any notebook from the side panel. Answers come with citations; insert them into a note or save them as a flashcard. Select text → right-click → *Ask NotebookLM about this*.
+- **Generate from notes and PDFs**: right-click a note, a **PDF** (also Word, PowerPoint or audio) or a folder → *Generate with NotebookLM*. The files are uploaded as sources (an unchanged file is never uploaded twice) and NotebookLM creates flashcards, a quiz, a mind map, an audio overview, a study guide or an infographic, which are then imported automatically. Generated notes link back to their PDF, and the toolbar has an *Open PDF* button to study side by side.
+- **Ask**: chat with any notebook from the side panel. Answers come with citations; insert them into a note or save them as a flashcard. Select text in a note → right-click → *Ask NotebookLM about this*; in the PDF viewer, select text and run *Ask NotebookLM about the selected text*.
 - **Sync**: browse notebooks and import what you need: flashcards, quizzes, mind maps, audio overviews (with a player), reports, infographics and slide decks. **Automatic sync** can bring in anything new every few hours or at startup.
 
 **Study**

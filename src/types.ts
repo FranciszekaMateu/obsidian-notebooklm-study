@@ -46,6 +46,8 @@ export interface NoteOrigin {
     notebookId?: string;
     notebookTitle?: string;
     artifactId?: string;
+    /** Vault paths of the notes / PDFs the content was generated from. */
+    sourceFiles?: string[];
     source: "notebooklm" | "file";
 }
 

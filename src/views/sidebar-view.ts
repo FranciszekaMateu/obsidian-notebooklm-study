@@ -6,6 +6,7 @@ import type NotebookLMStudy from "../main";
 import { Artifact, CreateRequest, Notebook, QueryReference } from "../nlm-cli";
 import { chip } from "../note-toolbar";
 import { parseFile } from "../parsers";
+import { isSourceFile } from "../sources";
 import { DeckInfo } from "../srs/deck-index";
 import { ParsedContent } from "../types";
 
@@ -390,7 +391,7 @@ export class SidebarView extends ItemView {
 
     private useActiveNote() {
         const file = this.app.workspace.getActiveFile();
-        this.genNotes = file && file.extension === "md" ? [file] : [];
+        this.genNotes = isSourceFile(file) ? [file] : [];
     }
 
     private defaultGenTitle(): string {
@@ -399,10 +400,11 @@ export class SidebarView extends ItemView {
         return "";
     }
 
-    /** Notebook the active note is linked to, if any. */
+    /** Notebook the active note is linked to, or the one the active PDF was uploaded to. */
     private linkedNotebook(): string | undefined {
         const file = this.app.workspace.getActiveFile();
-        return file ? this.plugin.index.decks.get(file.path)?.notebookId : undefined;
+        if (!file) return undefined;
+        return this.plugin.index.decks.get(file.path)?.notebookId ?? this.plugin.syncState.uploads[file.path]?.notebookId;
     }
 
     private renderGenerate(el: HTMLElement) {
@@ -415,16 +417,21 @@ export class SidebarView extends ItemView {
         const src = body.createDiv({ cls: "nlm-sb-field" });
         src.createDiv({ cls: "nlm-sb-label", text: t("Sources") });
         if (this.genNotes.length) {
-            const names = this.genNotes.slice(0, 3).map(f => f.basename).join(", ");
-            const more = this.genNotes.length > 3 ? ` +${this.genNotes.length - 3}` : "";
-            src.createDiv({ cls: "nlm-sb-pill", text: `${names}${more}` });
+            const pills = src.createDiv({ cls: "nlm-sb-pills" });
+            for (const f of this.genNotes.slice(0, 6)) {
+                const pill = pills.createDiv({ cls: "nlm-sb-pill" });
+                setIcon(pill.createSpan({ cls: "nlm-btn-icon" }), f.extension === "pdf" ? "file-type-2" : f.extension === "md" ? "file-text" : "file");
+                pill.createSpan({ text: f.name });
+                if (this.plugin.syncState.uploads[f.path]) pill.setAttr("aria-label", t("Already uploaded; it will not be uploaded again if unchanged."));
+            }
+            if (this.genNotes.length > 6) pills.createDiv({ cls: "nlm-sb-muted", text: t("and {n} more", { n: this.genNotes.length - 6 }) });
         } else {
             src.createDiv({ cls: "nlm-sb-muted", text: t("The notebook's existing sources") });
         }
         const srcActions = src.createDiv({ cls: "nlm-actions" });
-        chipButton(srcActions, "file-text", t("Use current note"), () => { this.useActiveNote(); this.genTitle = this.defaultGenTitle(); this.render(); });
+        chipButton(srcActions, "file-text", t("Use current file"), () => { this.useActiveNote(); this.genTitle = this.defaultGenTitle(); this.render(); });
         if (this.genNotes.length) chipButton(srcActions, "x", t("Clear"), () => { this.genNotes = []; this.render(); });
-        src.createDiv({ cls: "nlm-sb-muted", text: t("Tip: right-click a note or folder → Generate with NotebookLM.") });
+        src.createDiv({ cls: "nlm-sb-muted", text: t("Notes, PDFs, Word, PowerPoint and audio files work. Tip: right-click a file or folder → Generate with NotebookLM.") });
 
         // Notebook
         const nbField = body.createDiv({ cls: "nlm-sb-field" });

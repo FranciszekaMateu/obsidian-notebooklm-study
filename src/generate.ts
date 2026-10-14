@@ -2,6 +2,7 @@ import { Events, TFile } from "obsidian";
 import { t } from "./i18n";
 import type NotebookLMStudy from "./main";
 import { Artifact, CreateRequest, Notebook } from "./nlm-cli";
+import { fullPath } from "./sources";
 
 export interface GenerateRequest {
     /** Notes uploaded as sources. Empty = use the notebook's existing sources. */
@@ -77,14 +78,26 @@ export class Generator extends Events {
                 notebook = await cli.createNotebook(req.notebook.title);
             }
 
-            // 2. Sources
+            // 2. Sources: notes as text, PDFs and other files as they are.
+            // A file already uploaded to this notebook and unchanged since is reused.
             const sourceIds: string[] = [];
-            for (const [i, note] of req.notes.entries()) {
-                this.update(job, t("Uploading {name} ({i}/{n})…", { name: note.basename, i: i + 1, n: req.notes.length }),
-                    0.05 + 0.25 * (i / Math.max(1, req.notes.length)));
-                const text = await this.plugin.app.vault.cachedRead(note);
-                const id = await cli.addTextSource(notebook.id, note.basename, stripFrontmatter(text));
-                if (id) sourceIds.push(id);
+            const uploads = this.plugin.syncState.uploads;
+            for (const [i, file] of req.notes.entries()) {
+                const progress = 0.05 + 0.25 * (i / Math.max(1, req.notes.length));
+                const known = uploads[file.path];
+                if (known && known.notebookId === notebook.id && known.mtime === file.stat.mtime) {
+                    sourceIds.push(known.sourceId);
+                    continue;
+                }
+                this.update(job, t("Uploading {name} ({i}/{n})…", { name: file.name, i: i + 1, n: req.notes.length }), progress);
+                const id = file.extension === "md"
+                    ? await cli.addTextSource(notebook.id, file.basename, stripFrontmatter(await this.plugin.app.vault.cachedRead(file)))
+                    : await cli.addFileSource(notebook.id, fullPath(this.plugin.app, file));
+                if (id) {
+                    sourceIds.push(id);
+                    uploads[file.path] = { notebookId: notebook.id, sourceId: id, mtime: file.stat.mtime };
+                    this.plugin.requestSave();
+                }
             }
 
             // 3. Start generation
@@ -117,7 +130,7 @@ export class Generator extends Events {
             let i = 0;
             for (const a of done.values()) {
                 this.update(job, t("Importing {name}…", { name: a.title }), 0.8 + 0.2 * (i++ / done.size));
-                const file = await this.plugin.importArtifact(notebook, a);
+                const file = await this.plugin.importArtifact(notebook, a, req.notes.map(f => f.path));
                 if (file) job.files.push(file);
             }
 

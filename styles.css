@@ -1687,3 +1687,18 @@ button.nlm-exam-dot.is-current { outline: 2px solid var(--interactive-accent); o
     .nlm-exam-row { grid-template-columns: 1fr auto; }
     .nlm-exam-row .nlm-mini-progress { display: none; }
 }
+
+/* ---------- Generate: source files ---------- */
+
+.nlm-sb-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--size-4-1);
+}
+
+.nlm-sb-pills .nlm-sb-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-4-1);
+    max-width: 100%;
+}

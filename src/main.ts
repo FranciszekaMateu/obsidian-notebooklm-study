@@ -11,6 +11,7 @@ import { NoteWriter } from "./note-writer";
 import { DEFAULT_SETTINGS, NotebookLMStudySettings, NotebookLMStudySettingTab } from "./settings";
 import { DeckIndex } from "./srs/deck-index";
 import { Scheduler, SrsData, emptySrs } from "./srs/scheduler";
+import { collectSources, isSourceFile } from "./sources";
 import { hasLegacyBlocks } from "./study-content";
 import { StudyItem } from "./types";
 import { BROWSER_VIEW, BrowserView } from "./views/browser-view";
@@ -21,6 +22,8 @@ interface SyncState {
     /** Artifact id -> time it was first imported. */
     imported: Record<string, number>;
     lastRun: number;
+    /** Vault file -> where it was uploaded as a source, so an unchanged file is not uploaded twice. */
+    uploads: Record<string, { notebookId: string; sourceId: string; mtime: number }>;
 }
 
 interface PluginData {
@@ -187,15 +190,26 @@ export default class NotebookLMStudy extends Plugin {
             this.addCommand({ id: "resync-all", name: t("Update all synced notes from NotebookLM"), callback: () => void this.resyncAll() });
             this.addCommand({
                 id: "generate-current-note",
-                name: t("Generate study material from current note"),
+                name: t("Generate study material from current file"),
                 checkCallback: checking => {
                     const file = this.app.workspace.getActiveFile();
-                    if (!file || file.extension !== "md") return false;
+                    if (!isSourceFile(file)) return false;
                     if (!checking) void this.openSidebar("generate", [file]);
                     return true;
                 },
             });
             this.addCommand({ id: "ask-notebook", name: t("Ask a notebook"), callback: () => void this.openSidebar("ask") });
+            this.addCommand({
+                id: "ask-selection",
+                name: t("Ask NotebookLM about the selected text"),
+                callback: () => {
+                    // Works in notes and in the PDF viewer.
+                    const editor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+                    const text = (editor?.getSelection() || window.getSelection()?.toString() || "").trim();
+                    if (!text) { new Notice(t("Select some text first.")); return; }
+                    void this.openSidebar("ask", undefined, text);
+                },
+            });
             this.addCommand({
                 id: "resync-current-note",
                 name: t("Update current note from NotebookLM"),
@@ -212,7 +226,7 @@ export default class NotebookLMStudy extends Plugin {
     private registerMenus() {
         if (!Platform.isDesktopApp) return;
         this.registerEvent(this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
-            const notes = file instanceof TFolder ? collectNotes(file) : file instanceof TFile && file.extension === "md" ? [file] : [];
+            const notes = file instanceof TFolder ? collectSources(file) : isSourceFile(file) ? [file] : [];
             if (!notes.length) return;
             menu.addItem(item => item
                 .setTitle(t("Generate with NotebookLM"))
@@ -247,7 +261,7 @@ export default class NotebookLMStudy extends Plugin {
         const data = ((await this.loadData()) ?? {}) as Partial<PluginData>;
         this.settings = Object.assign({}, DEFAULT_SETTINGS, data.settings);
         this.srs = Object.assign(emptySrs(), data.srs);
-        this.syncState = Object.assign({ imported: {}, lastRun: 0 }, data.sync);
+        this.syncState = Object.assign({ imported: {}, lastRun: 0, uploads: {} }, data.sync);
     }
 
     private async persist() {
@@ -403,9 +417,9 @@ export default class NotebookLMStudy extends Plugin {
     }
 
     /** Download one artifact into the vault. Returns the note, or null on failure (already reported). */
-    async importArtifact(nb: Pick<Notebook, "id" | "title">, a: Artifact): Promise<TFile | null> {
+    async importArtifact(nb: Pick<Notebook, "id" | "title">, a: Artifact, sourceFiles?: string[]): Promise<TFile | null> {
         const cli = this.nlm();
-        const origin = { source: "notebooklm" as const, notebookId: nb.id, notebookTitle: nb.title, artifactId: a.id };
+        const origin = { source: "notebooklm" as const, notebookId: nb.id, notebookTitle: nb.title, artifactId: a.id, sourceFiles };
         try {
             let file: TFile;
             if ((STUDY_KINDS as string[]).includes(a.kind)) {
@@ -473,15 +487,6 @@ export default class NotebookLMStudy extends Plugin {
         notice?.hide();
         new Notice(t("Updated {n} note(s).", { n: ok }) + (failures.length ? `\n${t("Failed:")}\n${failures.join("\n")}` : ""), failures.length ? 10000 : 4000);
     }
-}
-
-function collectNotes(folder: TFolder): TFile[] {
-    const out: TFile[] = [];
-    for (const child of folder.children) {
-        if (child instanceof TFile && child.extension === "md") out.push(child);
-        else if (child instanceof TFolder) out.push(...collectNotes(child));
-    }
-    return out;
 }
 
 function insertBlock(editor: Editor, block: string, replaceSelection = false) {

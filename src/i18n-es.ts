@@ -417,4 +417,12 @@ export const ES: Record<string, string> = {
     "{n} to study": "{n} para estudiar",
     "{pct}% correct": "{pct}% correctas",
     "{pct}% learned": "{pct}% aprendido",
+    "Generate study material from current file": "Generar material de estudio desde el archivo actual",
+    "Ask NotebookLM about the selected text": "Preguntar a NotebookLM sobre el texto seleccionado",
+    "Select some text first.": "Selecciona algo de texto primero.",
+    "Already uploaded; it will not be uploaded again if unchanged.": "Ya subido; no se vuelve a subir si no cambió.",
+    "Use current file": "Usar el archivo actual",
+    "Notes, PDFs, Word, PowerPoint and audio files work. Tip: right-click a file or folder → Generate with NotebookLM.": "Sirven notas, PDF, Word, PowerPoint y audios. Consejo: clic derecho en un archivo o carpeta → Generar con NotebookLM.",
+    "Open PDF": "Abrir PDF",
+    "Open source": "Abrir fuente",
 };

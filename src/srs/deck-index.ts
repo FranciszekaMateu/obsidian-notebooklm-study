@@ -12,6 +12,8 @@ export interface DeckInfo {
     notebookTitle?: string;
     artifactId?: string;
     synced?: string;
+    /** Notes / PDFs it was generated from (frontmatter nlm-sources). */
+    sourceFiles: unknown;
     items: StudyItem[];
 }
 
@@ -104,6 +106,7 @@ export class DeckIndex extends Events {
             notebookTitle: fm?.["nlm-notebook-title"],
             artifactId: fm?.["nlm-artifact"],
             synced: fm?.["nlm-synced"],
+            sourceFiles: fm?.["nlm-sources"],
             items,
         });
         if (notify) this.trigger("changed");

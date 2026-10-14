@@ -169,6 +169,10 @@ function frontmatter(type: ContentType, opts: NoteOptions): string {
     if (o.notebookTitle) lines.push(`nlm-notebook-title: ${yamlString(o.notebookTitle)}`);
     if (o.artifactId) lines.push(`nlm-artifact: ${o.artifactId}`);
     lines.push(`nlm-source: ${o.source}`);
+    if (o.sourceFiles?.length) {
+        lines.push("nlm-sources:");
+        for (const f of o.sourceFiles) lines.push(`  - ${yamlString(`[[${f}]]`)}`);
+    }
     lines.push(`nlm-synced: ${new Date().toISOString()}`);
     lines.push(`tags:`, `  - nlm/${type}`);
     if (type === "mindmap") lines.push(`markmap:`, `  initialExpandLevel: 2`);

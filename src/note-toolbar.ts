@@ -1,6 +1,7 @@
 import { MarkdownView, Platform, TFile, setIcon } from "obsidian";
 import { kindLabel } from "./generate";
 import { t, tn } from "./i18n";
+import { sourceLinks } from "./sources";
 import type NotebookLMStudy from "./main";
 
 const TOOLBAR_CLS = "nlm-note-toolbar";
@@ -61,6 +62,7 @@ export class NoteToolbars {
             if (deck.type === "mindmap" && p.app.vault.getAbstractFileByPath(canvas)) {
                 button(actions, "layout-dashboard", t("Open canvas"), () => void p.app.workspace.openLinkText(canvas, file.path, "tab"));
             }
+            this.sourceButton(actions, file);
             this.askButton(actions, file);
             if (deck.type === "mindmap") this.syncButton(actions, file);
             return;
@@ -99,8 +101,21 @@ export class NoteToolbars {
             button(actions, "list-checks", t("Practice quiz"), () => void p.openQuizPractice(file.path));
             button(actions, "timer", t("Exam"), () => void p.openExamSetup([file.path]));
         }
+        this.sourceButton(actions, file);
         this.askButton(actions, file);
         this.syncButton(actions, file);
+    }
+
+    /** Open the PDF / note the content was generated from, next to this note. */
+    private sourceButton(actions: HTMLElement, file: TFile) {
+        const deck = this.plugin.index.decks.get(file.path);
+        const sources = deck ? sourceLinks(this.plugin.app, deck.sourceFiles, file.path) : [];
+        if (!sources.length) return;
+        const first = sources[0];
+        const b = button(actions, first.extension === "pdf" ? "file-type-2" : "file-text", first.extension === "pdf" ? t("Open PDF") : t("Open source"), () => {
+            void this.plugin.app.workspace.getLeaf("split").openFile(first);
+        });
+        b.setAttr("aria-label", sources.map(s => s.name).join(", "));
     }
 
     /** Generate / ask buttons for notes linked to a notebook (desktop only). */
