@@ -31,7 +31,7 @@ export class SidebarView extends ItemView {
     private selected = new Map<string, Set<string>>();
     private expandedNotebook: string | null = null;
     private notebookQuery = "";
-    private open = new Set<string>(["today", "decks"]);
+    private openSections = new Set<string>(["today", "decks"]);
     private collapsedDecks = new Set<string>();
     private busy: string | null = null;
     private draft: ImportDraft | null = null;
@@ -61,7 +61,7 @@ export class SidebarView extends ItemView {
 
     /** Open a section (and scroll to it). Used by commands. */
     reveal(section: "sync" | "import") {
-        this.open.add(section);
+        this.openSections.add(section);
         this.render();
         this.contentEl.querySelector(`[data-section="${section}"]`)?.scrollIntoView({ block: "start" });
         if (section === "sync" && this.notebooks.state === "idle") void this.loadNotebooks();
@@ -80,21 +80,21 @@ export class SidebarView extends ItemView {
 
     private section(parent: HTMLElement, id: string, icon: string, title: string, extra?: (h: HTMLElement) => void): HTMLElement {
         const sec = parent.createDiv({ cls: "nlm-sb-section", attr: { "data-section": id } });
-        const head = sec.createDiv({ cls: "nlm-sb-head", attr: { role: "button", tabindex: "0", "aria-expanded": String(this.open.has(id)) } });
-        setIcon(head.createSpan({ cls: "nlm-sb-caret" }), this.open.has(id) ? "chevron-down" : "chevron-right");
+        const head = sec.createDiv({ cls: "nlm-sb-head", attr: { role: "button", tabindex: "0", "aria-expanded": String(this.openSections.has(id)) } });
+        setIcon(head.createSpan({ cls: "nlm-sb-caret" }), this.openSections.has(id) ? "chevron-down" : "chevron-right");
         setIcon(head.createSpan({ cls: "nlm-btn-icon" }), icon);
         head.createSpan({ cls: "nlm-sb-title", text: title });
         extra?.(head);
         const toggle = () => {
-            if (this.open.has(id)) this.open.delete(id);
-            else this.open.add(id);
-            if (id === "sync" && this.open.has(id) && this.notebooks.state === "idle") void this.loadNotebooks();
+            if (this.openSections.has(id)) this.openSections.delete(id);
+            else this.openSections.add(id);
+            if (id === "sync" && this.openSections.has(id) && this.notebooks.state === "idle") void this.loadNotebooks();
             this.render();
         };
         head.onclick = e => { if (!(e.target as HTMLElement).closest("button")) toggle(); };
         head.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } };
         const body = sec.createDiv({ cls: "nlm-sb-body" });
-        if (!this.open.has(id)) body.hide();
+        if (!this.openSections.has(id)) body.hide();
         return body;
     }
 
@@ -261,7 +261,7 @@ export class SidebarView extends ItemView {
 
     private async loadNotebooks() {
         this.notebooks = { state: "loading" };
-        this.open.add("sync");
+        this.openSections.add("sync");
         this.render();
         try {
             this.notebooks = { state: "ready", value: await this.plugin.nlm().listNotebooks() };
@@ -448,7 +448,7 @@ export class SidebarView extends ItemView {
                 draft.error = (e as Error).message;
             }
             this.draft = draft;
-            this.open.add("import");
+            this.openSections.add("import");
             this.render();
         };
         input.click();
