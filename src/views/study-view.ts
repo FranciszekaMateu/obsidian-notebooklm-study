@@ -259,7 +259,7 @@ export class StudyView extends ItemView {
     }
 
     private renderHeatmap(panel: HTMLElement) {
-        const weeks = 20;
+        const weeks = 52;
         const activity = this.plugin.scheduler.activity(weeks * 7);
         const total = activity.reduce((a, b) => a + b.count, 0);
         const head = panel.createDiv({ cls: "nlm-panel-head" });

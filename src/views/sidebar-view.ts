@@ -1,5 +1,7 @@
 import { Component, ItemView, MarkdownRenderer, MarkdownView, Notice, Platform, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import { CardKind, CardSource, normalizeName, tidySelection } from "../card-maker";
 import { flashcardCallout } from "../callouts";
+import { clozeGroups } from "../cloze";
 import { kindLabel } from "../generate";
 import { locale, t, tn } from "../i18n";
 import type NotebookLMStudy from "../main";
@@ -11,7 +13,7 @@ import { DeckInfo } from "../srs/deck-index";
 import { ParsedContent } from "../types";
 
 export const SIDEBAR_VIEW = "nlm-sidebar-view";
-export type SidebarSection = "sync" | "generate" | "ask" | "import";
+export type SidebarSection = "sync" | "generate" | "ask" | "card" | "import";
 
 const KIND_ICON: Record<string, string> = {
     flashcards: "layers", quiz: "list-checks", mind_map: "network",
@@ -21,6 +23,13 @@ const TYPE_ICON: Record<string, string> = {
     flashcards: "layers", quiz: "list-checks", mindmap: "network",
     audio: "audio-lines", report: "file-text", infographic: "image", slides: "presentation",
 };
+
+export interface RevealOptions {
+    notes?: TFile[];
+    question?: string;
+    notebook?: string;
+    selection?: { text: string; source?: CardSource };
+}
 
 type Load<T> = { state: "idle" } | { state: "loading" } | { state: "error"; message: string } | { state: "ready"; value: T };
 
@@ -59,6 +68,8 @@ export class SidebarView extends ItemView {
     // Generate
     private genNotes: TFile[] = [];
     private genTarget = "new";
+    /** The notebook was picked automatically; re-pick once the notebook list loads. */
+    private genAutoTarget = false;
     private genTitle = "";
     private genOutputs = new Set<OutputKey>(["flashcards", "quiz"]);
     private genFocus = "";
@@ -72,6 +83,13 @@ export class SidebarView extends ItemView {
     private askDraft = "";
     private askPending = false;
     private chatComponent = new Component();
+
+    // New card
+    private cardKind: CardKind = "basic";
+    private cardFront = "";
+    private cardBack = "";
+    private cardSource: CardSource | undefined;
+    private cardBusy = false;
 
     constructor(leaf: WorkspaceLeaf, private plugin: NotebookLMStudy) {
         super(leaf);
@@ -107,15 +125,17 @@ export class SidebarView extends ItemView {
     }
 
     /** Open a section (and scroll to it). Used by commands and menus. */
-    reveal(section: SidebarSection, opts: { notes?: TFile[]; question?: string } = {}) {
+    reveal(section: SidebarSection, opts: RevealOptions = {}) {
         this.openSections.add(section);
         if (section === "generate") {
             if (opts.notes?.length) this.genNotes = opts.notes;
-            else if (!this.genNotes.length) this.useActiveNote();
+            else if (!this.genNotes.length && !opts.notebook) this.useActiveNote();
             this.genTitle = this.defaultGenTitle();
-            const linked = this.linkedNotebook();
-            if (linked) this.genTarget = linked;
+            this.genAutoTarget = !opts.notebook;
+            if (opts.notebook) this.genTarget = opts.notebook;
+            else this.suggestGenTarget();
         }
+        if (section === "card" && opts.selection) this.startCard(opts.selection.text, opts.selection.source);
         if (section === "ask" && opts.question) this.askDraft = opts.question;
         if (section === "ask") {
             const linked = this.linkedNotebook();
@@ -129,6 +149,7 @@ export class SidebarView extends ItemView {
         this.render();
         this.contentEl.querySelector(`[data-section="${section}"]`)?.scrollIntoView({ block: "start" });
         if (section === "ask") this.contentEl.querySelector<HTMLTextAreaElement>(".nlm-chat-input textarea")?.focus();
+        if (section === "card") this.contentEl.querySelector<HTMLTextAreaElement>(".nlm-card-form textarea")?.focus();
     }
 
     render() {
@@ -143,6 +164,7 @@ export class SidebarView extends ItemView {
             this.renderGenerate(el);
             this.renderAsk(el);
         }
+        this.renderNewCard(el);
         this.renderDecks(el);
         this.renderImport(el);
         el.scrollTop = scroll;
@@ -284,7 +306,7 @@ export class SidebarView extends ItemView {
         if (!expanded) return;
         const panel = list.createDiv({ cls: "nlm-sb-artifacts" });
         const quick = panel.createDiv({ cls: "nlm-actions" });
-        chipButton(quick, "sparkles", t("Generate"), () => { this.genTarget = nb.id; this.genNotes = []; this.genTitle = nb.title; this.reveal("generate"); });
+        chipButton(quick, "sparkles", t("Generate"), () => { this.genNotes = []; this.reveal("generate", { notebook: nb.id }); });
         chipButton(quick, "message-circle", t("Ask"), () => { this.askNotebook = nb.id; this.askConversation = undefined; this.reveal("ask"); });
 
         const load = this.artifacts.get(nb.id) ?? { state: "loading" };
@@ -344,6 +366,7 @@ export class SidebarView extends ItemView {
         this.render();
         try {
             this.notebooks = { state: "ready", value: await this.plugin.nlm().listNotebooks() };
+            if (this.genAutoTarget) this.suggestGenTarget();
         } catch (e) {
             this.notebooks = { state: "error", message: (e as Error).message };
         }
@@ -407,6 +430,34 @@ export class SidebarView extends ItemView {
         return this.plugin.index.decks.get(file.path)?.notebookId ?? this.plugin.syncState.uploads[file.path]?.notebookId;
     }
 
+    /**
+     * Pick the notebook for the chosen sources: the one they were already
+     * uploaded to, else one named like a folder they live in ("Aprendizaje
+     * Automático/…/x.pdf" → notebook "Aprendizaje automático"), else a new one.
+     */
+    private suggestGenTarget() {
+        if (!this.genNotes.length) {
+            this.genTarget = this.linkedNotebook() ?? this.genTarget;
+            return;
+        }
+        const uploads = this.plugin.syncState.uploads;
+        const known = this.genNotes.map(f => uploads[f.path]?.notebookId ?? this.plugin.index.decks.get(f.path)?.notebookId).find(Boolean);
+        if (known) {
+            this.genTarget = known;
+            return;
+        }
+        const notebooks = this.notebooks.state === "ready" ? this.notebooks.value : [];
+        for (let folder = this.genNotes[0].parent; folder && !folder.isRoot(); folder = folder.parent) {
+            const name = normalizeName(folder.name);
+            const match = notebooks.find(n => normalizeName(n.title) === name);
+            if (match) {
+                this.genTarget = match.id;
+                return;
+            }
+        }
+        this.genTarget = "new";
+    }
+
     private renderGenerate(el: HTMLElement) {
         const gen = this.plugin.generator;
         const body = this.section(el, "generate", "sparkles", t("Generate"), head => {
@@ -429,7 +480,12 @@ export class SidebarView extends ItemView {
             src.createDiv({ cls: "nlm-sb-muted", text: t("The notebook's existing sources") });
         }
         const srcActions = src.createDiv({ cls: "nlm-actions" });
-        chipButton(srcActions, "file-text", t("Use current file"), () => { this.useActiveNote(); this.genTitle = this.defaultGenTitle(); this.render(); });
+        chipButton(srcActions, "file-text", t("Use current file"), () => {
+            this.useActiveNote();
+            this.genTitle = this.defaultGenTitle();
+            if (this.genAutoTarget) this.suggestGenTarget();
+            this.render();
+        });
         if (this.genNotes.length) chipButton(srcActions, "x", t("Clear"), () => { this.genNotes = []; this.render(); });
         src.createDiv({ cls: "nlm-sb-muted", text: t("Notes, PDFs, Word, PowerPoint and audio files work. Tip: right-click a file or folder → Generate with NotebookLM.") });
 
@@ -444,7 +500,7 @@ export class SidebarView extends ItemView {
             void this.loadNotebooks();
         }
         select.value = this.genTarget;
-        select.onchange = () => { this.genTarget = select.value; this.render(); };
+        select.onchange = () => { this.genTarget = select.value; this.genAutoTarget = false; this.render(); };
         if (this.genTarget === "new") {
             const title = nbField.createEl("input", { type: "text", attr: { placeholder: t("Notebook title") } });
             title.value = this.genTitle || this.defaultGenTitle();
@@ -690,6 +746,153 @@ export class SidebarView extends ItemView {
         new Notice(t("Flashcard added to {name}.", { name: view.file?.basename ?? "" }));
     }
 
+    // --- New card -------------------------------------------------------------
+
+    /** Prefill the form from selected text: the answer of a basic card, or the text of a cloze. */
+    private startCard(text: string, source?: CardSource) {
+        const tidy = tidySelection(text);
+        this.cardSource = source;
+        if (this.cardKind === "cloze") {
+            this.cardFront = tidy;
+        } else {
+            this.cardFront = "";
+            this.cardBack = tidy;
+        }
+    }
+
+    private renderNewCard(el: HTMLElement) {
+        const maker = this.plugin.cardMaker;
+        const body = this.section(el, "card", "square-plus", t("New card"));
+        const form = body.createDiv({ cls: "nlm-card-form" });
+
+        // Source and destination
+        const src = form.createDiv({ cls: "nlm-sb-field" });
+        src.createDiv({ cls: "nlm-sb-label", text: t("Source") });
+        const s = this.cardSource;
+        if (s) {
+            const pill = src.createDiv({ cls: "nlm-sb-pills" }).createDiv({ cls: "nlm-sb-pill" });
+            setIcon(pill.createSpan({ cls: "nlm-btn-icon" }), s.file.extension === "pdf" ? "file-type-2" : "file-text");
+            pill.createSpan({ text: s.page ? t("{name}, p. {page}", { name: s.file.name, page: s.page }) : s.file.name });
+        } else {
+            src.createDiv({ cls: "nlm-sb-muted", text: t("None") });
+        }
+        const actions = src.createDiv({ cls: "nlm-actions" });
+        chipButton(actions, "text-select", t("Use selection"), () => {
+            const sel = this.plugin.lastSelection();
+            if (!sel.text) { new Notice(t("Select some text in a PDF or note first.")); return; }
+            this.startCard(sel.text, sel.source);
+            this.render();
+        });
+        if (s) chipButton(actions, "x", t("Clear"), () => { this.cardSource = undefined; this.render(); });
+        const n = maker.count(s);
+        const dest = src.createDiv({ cls: "nlm-sb-muted nlm-card-dest" });
+        dest.setText(t("Saved to {name}", { name: maker.notePath(s).split("/").pop()!.replace(/\.md$/, "") }) + (n ? ` · ${tn(n, "{n} card", "{n} cards")}` : ""));
+        if (n) {
+            dest.addClass("is-link");
+            dest.onclick = () => {
+                const f = this.app.vault.getAbstractFileByPath(maker.notePath(s));
+                if (f instanceof TFile) void this.app.workspace.getLeaf("tab").openFile(f);
+            };
+        }
+
+        // Kind
+        const kinds = form.createDiv({ cls: "nlm-card-kinds" });
+        const kind = (k: CardKind, icon: string, label: string) => {
+            const b = kinds.createEl("button", { cls: "nlm-chip-btn" });
+            b.toggleClass("is-active", this.cardKind === k);
+            setIcon(b.createSpan({ cls: "nlm-btn-icon" }), icon);
+            b.createSpan({ text: label });
+            b.onclick = () => {
+                if (this.cardKind === k) return;
+                // Keep the selected text where it makes sense for the new kind.
+                if (k === "cloze" && !this.cardFront.trim()) this.cardFront = this.cardBack;
+                if (this.cardKind === "cloze" && !this.cardBack.trim()) { this.cardBack = this.cardFront.replace(/\{\{(?:c\d+::)?(.+?)\}\}/g, "$1"); this.cardFront = ""; }
+                this.cardKind = k;
+                this.render();
+            };
+        };
+        kind("basic", "layers", t("Basic"));
+        kind("reverse", "repeat", t("Both ways"));
+        kind("cloze", "brackets", t("Cloze"));
+
+        const save = () => void this.saveCard();
+        const area = (label: string, value: string, placeholder: string, onInput: (v: string) => void) => {
+            const field = form.createDiv({ cls: "nlm-sb-field" });
+            field.createDiv({ cls: "nlm-sb-label", text: label });
+            const ta = field.createEl("textarea", { attr: { rows: "3", placeholder } });
+            ta.value = value;
+            ta.oninput = () => onInput(ta.value);
+            ta.onkeydown = e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); } };
+            return { field, ta };
+        };
+
+        if (this.cardKind === "cloze") {
+            const { field, ta } = area(t("Text"), this.cardFront, t("Select words in the box and press Hide, or type {{ }} around them."), v => (this.cardFront = v));
+            const row = field.createDiv({ cls: "nlm-actions" });
+            chipButton(row, "eye-off", t("Hide selection"), () => {
+                const { selectionStart: a, selectionEnd: b, value } = ta;
+                if (a === b) { new Notice(t("Select the words to hide inside the box.")); return; }
+                // Each {{ }} becomes its own card; the parser numbers them.
+                this.cardFront = `${value.slice(0, a)}{{${value.slice(a, b).trim()}}}${value.slice(b)}`;
+                this.render();
+                this.contentEl.querySelector<HTMLTextAreaElement>(".nlm-card-form textarea")?.focus();
+            });
+            const groups = clozeGroups(this.cardFront).length;
+            row.createSpan({ cls: "nlm-sb-muted", text: groups ? tn(groups, "{n} gap", "{n} gaps") : t("No gaps yet") });
+        } else {
+            const q = area(t("Question"), this.cardFront, this.cardKind === "reverse" ? t("Term") : t("What should this card ask?"), v => (this.cardFront = v));
+            const notebook = s && Platform.isDesktopApp ? this.plugin.cardMaker.notebookOf(s.file) : undefined;
+            if (notebook) {
+                const row = q.field.createDiv({ cls: "nlm-actions" });
+                chipButton(row, "sparkles", this.cardBusy ? t("Thinking…") : t("Suggest a question"), () => void this.suggestQuestion(notebook.id));
+            }
+            area(t("Answer"), this.cardBack, this.cardKind === "reverse" ? t("Definition") : t("The answer (selected text goes here)"), v => (this.cardBack = v));
+        }
+
+        const ready = this.cardKind === "cloze" ? /\{\{.+?\}\}/.test(this.cardFront) : !!this.cardFront.trim() && !!this.cardBack.trim();
+        const btn = form.createEl("button", { cls: "mod-cta nlm-sb-wide" });
+        setIcon(btn.createSpan({ cls: "nlm-btn-icon" }), "plus");
+        btn.createSpan({ text: t("Save card") });
+        btn.disabled = !ready;
+        btn.onclick = save;
+        form.createDiv({ cls: "nlm-sb-muted", text: t("Ctrl+Enter saves. Tip: select text in a PDF and use the floating Card button.") });
+    }
+
+    private async saveCard() {
+        const front = this.cardFront.trim();
+        const back = this.cardBack.trim();
+        if (this.cardKind === "cloze" ? !/\{\{.+?\}\}/.test(front) : !front || !back) return;
+        try {
+            const file = await this.plugin.cardMaker.add({ kind: this.cardKind, front, back, source: this.cardSource });
+            new Notice(t("Card saved to {name}.", { name: file.basename }));
+            this.cardFront = "";
+            this.cardBack = "";
+        } catch (e) {
+            new Notice(t("Could not save the card: {error}", { error: (e as Error).message }));
+        }
+        this.render();
+        this.contentEl.querySelector<HTMLTextAreaElement>(".nlm-card-form textarea")?.focus();
+    }
+
+    /** Ask the source's notebook to phrase a question whose answer is the selected text. */
+    private async suggestQuestion(notebookId: string) {
+        if (this.cardBusy) return;
+        const answer = this.cardBack.trim();
+        if (!answer) { new Notice(t("Write or select the answer first.")); return; }
+        this.cardBusy = true;
+        this.render();
+        try {
+            const prompt = t("Write ONE short flashcard question whose answer is the text below. Reply with the question only, no quotes or explanations.\n\nText: {text}", { text: answer });
+            const res = await this.plugin.nlm().query(notebookId, prompt);
+            this.cardFront = cleanAnswer(res.answer).split("\n").find(l => l.trim())?.replace(/^["“*\s]+|["”*\s]+$/g, "") ?? "";
+        } catch (e) {
+            new Notice((e as Error).message);
+        } finally {
+            this.cardBusy = false;
+            this.render();
+        }
+    }
+
     // --- Decks ----------------------------------------------------------------
 
     private renderDecks(el: HTMLElement) {
@@ -883,3 +1086,4 @@ export function relativeTime(iso: string): string {
     if (d < 30) return tn(d, "{n} day ago", "{n} days ago");
     return new Date(time).toLocaleDateString(locale());
 }
+

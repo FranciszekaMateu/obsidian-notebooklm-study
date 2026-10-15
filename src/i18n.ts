@@ -18,8 +18,9 @@ export function setLanguage(pref: LanguagePref) {
     }
     let ui = "en";
     try {
-        // Obsidian stores the interface language here ("es", "en", …); unset means English.
-        ui = window.localStorage.getItem("language") || "en";
+        // Obsidian sets <html lang> to the interface language; older versions
+        // also keep it in localStorage ("language", unset = English).
+        ui = document.documentElement.lang || window.localStorage.getItem("language") || "en";
     } catch {
         // storage unavailable
     }

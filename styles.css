@@ -11,6 +11,10 @@ body {
     --nlm-due-rgb: var(--color-green-rgb);
     --nlm-mature: var(--color-purple);
     --nlm-radius: var(--radius-l);
+    /* Some themes (e.g. Wasp) make --text-faint almost invisible and paint
+       --background-modifier-border with the accent colour; derive our own. */
+    --nlm-faint: color-mix(in srgb, var(--text-muted) 70%, var(--background-primary));
+    --nlm-track: color-mix(in srgb, var(--text-normal) 9%, transparent);
 }
 
 /* ---------- Shared ---------- */
@@ -93,7 +97,7 @@ button .nlm-btn-icon + span { margin-left: var(--size-4-1); }
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: var(--text-faint);
+    background: var(--nlm-faint);
 }
 
 .nlm-chip-new .nlm-chip-dot { background: var(--nlm-new); }
@@ -104,7 +108,7 @@ button .nlm-btn-icon + span { margin-left: var(--size-4-1); }
     height: 4px;
     min-width: 40px;
     border-radius: 2px;
-    background: var(--background-modifier-border);
+    background: var(--nlm-track);
     overflow: hidden;
 }
 
@@ -341,13 +345,13 @@ button.nlm-sb-cta { font-size: var(--font-ui-medium); padding: var(--size-4-3); 
 }
 
 .nlm-sb-head:hover { background: var(--background-modifier-hover); }
-.nlm-sb-caret { display: inline-flex; color: var(--text-faint); }
+.nlm-sb-caret { display: inline-flex; color: var(--nlm-faint); }
 .nlm-sb-caret svg { width: 14px; height: 14px; }
 .nlm-sb-title { flex: 1; }
 
 .nlm-sb-count {
     font-size: var(--font-ui-smaller);
-    color: var(--text-faint);
+    color: var(--nlm-faint);
     font-weight: normal;
 }
 
@@ -363,7 +367,7 @@ button.nlm-sb-cta { font-size: var(--font-ui-medium); padding: var(--size-4-3); 
     font-size: var(--font-ui-smaller);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: var(--text-faint);
+    color: var(--nlm-faint);
 }
 
 .nlm-sb-muted {
@@ -435,7 +439,7 @@ button.nlm-sb-cta { font-size: var(--font-ui-medium); padding: var(--size-4-3); 
 
 .nlm-sb-row-meta {
     font-size: var(--font-ui-smaller);
-    color: var(--text-faint);
+    color: var(--nlm-faint);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -605,7 +609,7 @@ button.nlm-hero-btn {
 }
 
 .nlm-tile-label { font-size: var(--font-ui-small); color: var(--text-muted); }
-.nlm-tile-sub { font-size: var(--font-ui-smaller); color: var(--text-faint); }
+.nlm-tile-sub { font-size: var(--font-ui-smaller); color: var(--nlm-faint); }
 
 .nlm-dash-grid {
     display: grid;
@@ -641,7 +645,7 @@ button.nlm-hero-btn {
     height: 14px;
     border-radius: 7px;
     overflow: hidden;
-    background: var(--background-modifier-border);
+    background: var(--nlm-track);
     gap: 2px;
 }
 
@@ -696,15 +700,17 @@ button.nlm-hero-btn {
 .nlm-heatmap {
     display: grid;
     grid-auto-flow: column;
-    grid-template-rows: repeat(7, 1fr);
-    grid-auto-columns: minmax(8px, 1fr);
+    grid-template-rows: repeat(7, 13px);
+    grid-auto-columns: 13px;
+    justify-content: end;
+    overflow-x: auto;
     gap: 3px;
 }
 
 .nlm-heat-cell {
     aspect-ratio: 1;
     border-radius: 2px;
-    background: var(--background-modifier-border);
+    background: var(--nlm-track);
 }
 
 .nlm-heat-cell.is-pad { visibility: hidden; }
@@ -723,7 +729,7 @@ button.nlm-hero-btn {
     text-align: right;
     font-weight: normal;
     font-size: var(--font-ui-smaller);
-    color: var(--text-faint);
+    color: var(--nlm-faint);
     padding: var(--size-4-1) var(--size-4-2);
     border-bottom: 1px solid var(--background-modifier-border);
 }
@@ -778,7 +784,7 @@ button.nlm-hero-btn {
 .nlm-progress {
     height: 6px;
     border-radius: 3px;
-    background: var(--background-modifier-border);
+    background: var(--nlm-track);
     overflow: hidden;
 }
 
@@ -866,7 +872,7 @@ button.nlm-hero-btn {
 .nlm-divider {
     height: 1px;
     margin: var(--size-4-2) 0 var(--size-4-4);
-    background: var(--background-modifier-border);
+    background: var(--nlm-track);
 }
 
 .nlm-review-back { animation: nlm-card-in 200ms ease-out; }
@@ -885,7 +891,7 @@ button.nlm-reveal {
 .nlm-hint-keys {
     margin-top: var(--size-4-3);
     text-align: center;
-    color: var(--text-faint);
+    color: var(--nlm-faint);
     font-size: var(--font-ui-smaller);
 }
 
@@ -956,7 +962,7 @@ button.nlm-grade.is-suggested {
     width: 120px;
     height: 120px;
     border-radius: 50%;
-    background: conic-gradient(var(--interactive-accent) calc(var(--pct) * 1%), var(--background-modifier-border) 0);
+    background: conic-gradient(var(--interactive-accent) calc(var(--pct) * 1%), var(--nlm-track) 0);
     font-size: 1.8em;
     font-weight: var(--font-bold);
 }
@@ -1261,7 +1267,7 @@ button.nlm-quiz-option.is-dim { opacity: 0.5; }
     font-size: var(--font-ui-smaller);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: var(--text-faint);
+    color: var(--nlm-faint);
     margin-top: var(--size-4-1);
 }
 
@@ -1570,7 +1576,7 @@ button.nlm-exam-dot.is-current { outline: 2px solid var(--interactive-accent); o
 .nlm-br-grid td { white-space: nowrap; }
 .nlm-br-grid td.nlm-br-prompt { white-space: normal; max-width: 420px; min-width: 220px; }
 .nlm-br-deckcell { max-width: 160px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); }
-.nlm-state-suspended { color: var(--text-faint); }
+.nlm-state-suspended { color: var(--nlm-faint); }
 .nlm-br-more { margin: var(--size-4-3) auto; display: block; }
 
 .nlm-br-detail-head { display: flex; align-items: center; gap: var(--size-4-2); }
@@ -1584,7 +1590,7 @@ button.nlm-exam-dot.is-current { outline: 2px solid var(--interactive-accent); o
 
 .nlm-br-side > div > :first-child { margin-top: 0; }
 .nlm-br-side > div > :last-child { margin-bottom: 0; }
-.nlm-br-side-label { font-size: var(--font-ui-smaller); color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+.nlm-br-side-label { font-size: var(--font-ui-smaller); color: var(--nlm-faint); text-transform: uppercase; letter-spacing: 0.05em; }
 .nlm-br-options { margin: 0; padding-left: var(--size-4-4); }
 .nlm-br-options li.is-correct { color: var(--color-green); font-weight: var(--font-semibold); }
 
@@ -1702,3 +1708,56 @@ button.nlm-exam-dot.is-current { outline: 2px solid var(--interactive-accent); o
     gap: var(--size-4-1);
     max-width: 100%;
 }
+
+/* ---------- New card ---------- */
+
+.nlm-card-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--size-4-2);
+}
+
+.nlm-card-form textarea {
+    width: 100%;
+    resize: vertical;
+    font-size: var(--font-ui-small);
+}
+
+.nlm-card-kinds {
+    display: flex;
+    gap: var(--size-4-1);
+    flex-wrap: wrap;
+}
+
+button.nlm-chip-btn.is-active {
+    color: var(--text-on-accent);
+    background: var(--interactive-accent);
+    border-color: var(--interactive-accent);
+}
+
+.nlm-card-dest.is-link { cursor: pointer; text-decoration: underline; }
+
+.nlm-sel-bar {
+    position: fixed;
+    z-index: var(--layer-popover);
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: var(--radius-m);
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    box-shadow: var(--shadow-s);
+}
+
+.nlm-sel-bar button {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--size-4-1);
+    height: auto;
+    padding: var(--size-2-2) var(--size-4-2);
+    font-size: var(--font-ui-small);
+    box-shadow: none;
+    background: transparent;
+}
+
+.nlm-sel-bar button:hover { background: var(--background-modifier-hover); }

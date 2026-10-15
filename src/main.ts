@@ -1,6 +1,7 @@
 import { Editor, MarkdownView, Menu, Notice, Platform, Plugin, TAbstractFile, TFile, TFolder, WorkspaceLeaf, debounce, setIcon } from "obsidian";
 import { State } from "ts-fsrs";
 import { AutoSync } from "./autosync";
+import { CardMaker } from "./card-maker";
 import { registerBlocks } from "./blocks";
 import { clozeCallout, flashcardCallout, quizCallout } from "./callouts";
 import { Generator } from "./generate";
@@ -11,11 +12,12 @@ import { NoteWriter } from "./note-writer";
 import { DEFAULT_SETTINGS, NotebookLMStudySettings, NotebookLMStudySettingTab } from "./settings";
 import { DeckIndex } from "./srs/deck-index";
 import { Scheduler, SrsData, emptySrs } from "./srs/scheduler";
+import { SelectionToolbar, TextSelection } from "./selection-toolbar";
 import { collectSources, isSourceFile } from "./sources";
 import { hasLegacyBlocks } from "./study-content";
 import { StudyItem } from "./types";
 import { BROWSER_VIEW, BrowserView } from "./views/browser-view";
-import { SIDEBAR_VIEW, SidebarSection, SidebarView } from "./views/sidebar-view";
+import { RevealOptions, SIDEBAR_VIEW, SidebarSection, SidebarView } from "./views/sidebar-view";
 import { STUDY_VIEW, StudyFilter, StudyView } from "./views/study-view";
 
 interface SyncState {
@@ -52,6 +54,8 @@ export default class NotebookLMStudy extends Plugin {
     writer!: NoteWriter;
     generator!: Generator;
     autoSync!: AutoSync;
+    cardMaker!: CardMaker;
+    private selectionToolbar!: SelectionToolbar;
     private statusEl: HTMLElement | null = null;
 
     requestSave = debounce(() => void this.persist(), 1500, true);
@@ -64,6 +68,8 @@ export default class NotebookLMStudy extends Plugin {
         this.writer = new NoteWriter(this.app, this.settings, this.index);
         this.generator = new Generator(this);
         this.autoSync = new AutoSync(this);
+        this.cardMaker = new CardMaker(this);
+        this.selectionToolbar = new SelectionToolbar(this);
 
         this.registerView(STUDY_VIEW, leaf => new StudyView(leaf, this));
         this.registerView(SIDEBAR_VIEW, leaf => new SidebarView(leaf, this));
@@ -182,6 +188,14 @@ export default class NotebookLMStudy extends Plugin {
                 new Notice(n ? tn(n, "Converted {n} note to callouts.", "Converted {n} notes to callouts.") : t("No notes use the old format."));
             },
         });
+        this.addCommand({
+            id: "new-card-from-selection",
+            name: t("New card from selected text"),
+            callback: () => {
+                const sel = this.lastSelection();
+                void this.openSidebar("card", sel.text ? { selection: sel } : {});
+            },
+        });
         this.addCommand({ id: "import-file", name: t("Import CSV / JSON export"), callback: () => void this.openSidebar("import") });
 
         if (Platform.isDesktopApp) {
@@ -194,7 +208,7 @@ export default class NotebookLMStudy extends Plugin {
                 checkCallback: checking => {
                     const file = this.app.workspace.getActiveFile();
                     if (!isSourceFile(file)) return false;
-                    if (!checking) void this.openSidebar("generate", [file]);
+                    if (!checking) void this.openSidebar("generate", { notes: [file] });
                     return true;
                 },
             });
@@ -207,7 +221,7 @@ export default class NotebookLMStudy extends Plugin {
                     const editor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
                     const text = (editor?.getSelection() || window.getSelection()?.toString() || "").trim();
                     if (!text) { new Notice(t("Select some text first.")); return; }
-                    void this.openSidebar("ask", undefined, text);
+                    void this.openSidebar("ask", { question: text });
                 },
             });
             this.addCommand({
@@ -224,6 +238,15 @@ export default class NotebookLMStudy extends Plugin {
     }
 
     private registerMenus() {
+        this.registerEvent(this.app.workspace.on("editor-menu", (menu: Menu, editor: Editor, info) => {
+            const text = editor.getSelection().trim();
+            if (!text || !(info.file instanceof TFile)) return;
+            const file = info.file;
+            menu.addItem(item => item
+                .setTitle(t("Make a card from this"))
+                .setIcon("square-plus")
+                .onClick(() => void this.openSidebar("card", { selection: { text, source: { file } } })));
+        }));
         if (!Platform.isDesktopApp) return;
         this.registerEvent(this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
             const notes = file instanceof TFolder ? collectSources(file) : isSourceFile(file) ? [file] : [];
@@ -231,7 +254,7 @@ export default class NotebookLMStudy extends Plugin {
             menu.addItem(item => item
                 .setTitle(t("Generate with NotebookLM"))
                 .setIcon("sparkles")
-                .onClick(() => void this.openSidebar("generate", notes)));
+                .onClick(() => void this.openSidebar("generate", { notes })));
         }));
         this.registerEvent(this.app.workspace.on("editor-menu", (menu: Menu, editor: Editor) => {
             const sel = editor.getSelection().trim();
@@ -239,7 +262,7 @@ export default class NotebookLMStudy extends Plugin {
             menu.addItem(item => item
                 .setTitle(t("Ask NotebookLM about this"))
                 .setIcon("message-circle-question")
-                .onClick(() => void this.openSidebar("ask", undefined, sel)));
+                .onClick(() => void this.openSidebar("ask", { question: sel })));
             menu.addItem(item => item
                 .setTitle(t("Turn into cloze card"))
                 .setIcon("brackets")
@@ -248,6 +271,16 @@ export default class NotebookLMStudy extends Plugin {
                     editor.replaceSelection(clozeCallout({ title: "", text: text.includes("{{") ? text : `{{${text}}}` }));
                 }));
         }));
+    }
+
+    /** Text selected in a note or PDF (or the last such selection). */
+    lastSelection(): TextSelection {
+        const editor = this.app.workspace.getActiveViewOfType(MarkdownView);
+        const file = editor?.file;
+        if (file && editor.getMode() === "source" && editor.editor.somethingSelected()) {
+            return { text: editor.editor.getSelection().trim(), source: { file } };
+        }
+        return this.selectionToolbar.selection();
     }
 
     private activeDeck() {
@@ -353,7 +386,7 @@ export default class NotebookLMStudy extends Plugin {
 
     // --- Navigation ---------------------------------------------------------
 
-    async openSidebar(section?: SidebarSection, notes?: TFile[], question?: string) {
+    async openSidebar(section?: SidebarSection, opts: RevealOptions = {}) {
         let leaf: WorkspaceLeaf | null = this.app.workspace.getLeavesOfType(SIDEBAR_VIEW)[0] ?? null;
         if (!leaf) {
             leaf = this.app.workspace.getRightLeaf(false);
@@ -361,7 +394,7 @@ export default class NotebookLMStudy extends Plugin {
             await leaf.setViewState({ type: SIDEBAR_VIEW, active: true });
         }
         await this.app.workspace.revealLeaf(leaf);
-        if (section && leaf.view instanceof SidebarView) leaf.view.reveal(section, { notes, question });
+        if (section && leaf.view instanceof SidebarView) leaf.view.reveal(section, opts);
     }
 
     private async studyView(): Promise<StudyView | null> {

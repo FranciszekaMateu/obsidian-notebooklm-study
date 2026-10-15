@@ -6,6 +6,7 @@ Bring the study material NotebookLM generates — **flashcards, quizzes and mind
 
 **NotebookLM, from inside Obsidian** (desktop, through the [`nlm` CLI](https://github.com/jacob-bd/gemini-notebook-mcp-cli))
 - **Generate from notes and PDFs**: right-click a note, a **PDF** (also Word, PowerPoint or audio) or a folder → *Generate with NotebookLM*. The files are uploaded as sources (an unchanged file is never uploaded twice) and NotebookLM creates flashcards, a quiz, a mind map, an audio overview, a study guide or an infographic, which are then imported automatically. Generated notes link back to their PDF, and the toolbar has an *Open PDF* button to study side by side.
+- **Your own cards from PDFs**: select text in a PDF and click the floating *Card* button (or right-click selected text in a note → *Make a card from this*). The side panel fills in the answer; type the question, or let NotebookLM *Suggest a question*. Basic, both-ways and cloze cards are saved to a companion note next to the PDF (`Lecture 3 - cards.md`) with a link back to the exact page, in the same deck as the course's notebook.
 - **Ask**: chat with any notebook from the side panel. Answers come with citations; insert them into a note or save them as a flashcard. Select text in a note → right-click → *Ask NotebookLM about this*; in the PDF viewer, select text and run *Ask NotebookLM about the selected text*.
 - **Sync**: browse notebooks and import what you need: flashcards, quizzes, mind maps, audio overviews (with a player), reports, infographics and slide decks. **Automatic sync** can bring in anything new every few hours or at startup.
 
@@ -75,6 +76,7 @@ Notes created by 2.0.0 (code-block format) keep working; run **Convert current n
 | Insert flashcard / reversible flashcard / cloze card / quiz question | |
 | Generate study material from current note | Desktop; also right-click a note or folder |
 | Ask a notebook | Desktop; also right-click selected text |
+| New card from selected text | Works in notes and PDFs; also the floating *Card* button in PDFs |
 | Add from NotebookLM / Check NotebookLM for new items | Desktop |
 | Update current note / all synced notes from NotebookLM | Desktop |
 | Import CSV / JSON export | |

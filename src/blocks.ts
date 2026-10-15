@@ -239,6 +239,7 @@ function words(s: string): string[] {
  */
 class MindMapBlock extends MarkdownRenderChild {
     private scale = 1;
+    private userZoomed = false;
     private x = 0;
     private y = 0;
     private treeEl!: HTMLElement;
@@ -270,7 +271,7 @@ class MindMapBlock extends MarkdownRenderChild {
         };
         tool("zoom-out", t("Zoom out"), () => this.zoom(1 / 1.2));
         tool("zoom-in", t("Zoom in"), () => this.zoom(1.2));
-        tool("scan", t("Reset view"), () => { this.scale = 1; this.x = 0; this.y = 0; this.apply(); });
+        tool("scan", t("Fit to width"), () => { this.userZoomed = false; this.fit(); });
         tool("chevrons-down-up", t("Collapse"), () => this.treeEl.querySelectorAll<HTMLElement>(".nlm-mm-node").forEach(n => {
             n.toggleClass("is-collapsed", Number(n.dataset.depth) >= 1 && n.hasClass("has-children"));
         }));
@@ -291,6 +292,10 @@ class MindMapBlock extends MarkdownRenderChild {
         this.related.hide();
         this.renderNode(tree, this.treeEl, 0);
         this.enablePanZoom();
+        // Fit whenever the note is resized (or first shown), until the user zooms by hand.
+        const ro = new ResizeObserver(() => { if (!this.userZoomed) this.fit(); });
+        ro.observe(this.viewport);
+        this.register(() => ro.disconnect());
         root.createDiv({ cls: "nlm-muted nlm-small nlm-mm-help", text: t("Drag to move · Ctrl + wheel to zoom · click a node to fold it · the card badge shows related cards") });
     }
 
@@ -375,7 +380,18 @@ class MindMapBlock extends MarkdownRenderChild {
         this.treeEl.style.transform = `translate(${this.x}px, ${this.y}px) scale(${this.scale})`;
     }
 
+    /** Shrink a map wider than the note so it is all visible (never below 50%). */
+    private fit() {
+        const avail = this.viewport.clientWidth;
+        const width = this.treeEl.scrollWidth;
+        this.scale = avail > 0 && width > avail ? Math.max(0.5, avail / width) : 1;
+        this.x = 0;
+        this.y = 0;
+        this.apply();
+    }
+
     private zoom(factor: number) {
+        this.userZoomed = true;
         this.scale = Math.min(3, Math.max(0.3, this.scale * factor));
         this.apply();
     }
